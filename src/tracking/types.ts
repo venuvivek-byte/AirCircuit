@@ -13,6 +13,8 @@ export type HandLandmarks = Landmark[];
 export interface TrackedHand {
   landmarks: HandLandmarks;
   handedness: 'Left' | 'Right';
+  /** MediaPipe world landmarks (meters, hand-centred, x mirrored): true 3D, so pinch distance ignores hand orientation. */
+  world?: HandLandmarks;
 }
 
 /** MediaPipe hand landmark indices. */

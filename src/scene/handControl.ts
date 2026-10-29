@@ -27,7 +27,7 @@ export class HandControl {
   constructor(private toScreen: (x: number, y: number) => { px: number; py: number }) {}
 
   update(hands: TrackedHand[], holding: boolean): HandFrame {
-    const events = this.pinches.map((d, i) => d.update(hands[i]?.landmarks ?? null));
+    const events = this.pinches.map((d, i) => d.update(hands[i]?.landmarks ?? null, hands[i]?.world));
     const primary = hands[0];
     if (!primary) {
       this.rotation.end();

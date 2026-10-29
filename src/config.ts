@@ -65,8 +65,12 @@ export const config = {
   },
   tracking: {
     numHands: 2,
-    // EMA weight of the newest sample (MVP_SPEC §3.1: alpha ~0.5).
-    smoothingAlpha: 0.5,
+    // One Euro filter per landmark coordinate (Casiez et al. 2012): heavy smoothing while the
+    // hand is still (no jitter), light smoothing while it moves fast (no drag lag).
+    // minCutoff (Hz): lower = less jitter at rest. beta: higher = less lag when moving.
+    oneEuro: { minCutoff: 1.0, beta: 20, dCutoff: 1.0 },
+    // Keep a hand alive this long after MediaPipe drops it, so a one-frame miss doesn't drop a drag.
+    handLostGraceMs: 250,
     // Run hand tracking every N rendered frames; auto-raised to 2 when FPS is low.
     trackingEveryNFrames: 1,
     lowFpsThreshold: 24,
@@ -91,6 +95,8 @@ export const config = {
     // Pinch: thumb tip <-> index tip distance divided by hand size (hysteresis).
     pinchClose: 0.35,
     pinchOpen: 0.5,
+    // A pinch only releases after this many consecutive open frames (stops flicker drops mid-drag).
+    pinchReleaseFrames: 3,
     // Wrist roll is measured relative to the roll at pinch start; ignore tiny changes.
     rollDeadzoneRad: 0.05,
     tiltDeadzoneRad: 0.05,

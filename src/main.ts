@@ -7,7 +7,7 @@ import { buildNetlist, type Netlist } from './sim/netlist';
 import { Simulator } from './sim/simulator';
 import type { Circuit } from './sim/types';
 import { HandTracker } from './tracking/handTracker';
-import { handSize, pinchRatio } from './tracking/gestures';
+import { handPinchRatio, handSize } from './tracking/gestures';
 import { HandControl } from './scene/handControl';
 import { HandSmoother, TrackingRateController } from './tracking/smoothing';
 import { LM, type TrackedHand } from './tracking/types';
@@ -263,7 +263,8 @@ function loop(now: number): void {
   const everyN = tracker.ready ? rateController.update(fpsCounter.fps, now) : rateController.everyNFrames;
   status.trackingEveryNFrames = everyN;
   if (tracker.ready && status.camera === 'ok' && frameIndex % everyN === 0) {
-    smoother.addSample(tracker.detect(video, now));
+    const detected = tracker.detect(video, now);
+    if (detected) smoother.addSample(detected, now);
   }
   const hands = smoother.frame(everyN);
   status.handCount = hands.length;
@@ -273,7 +274,7 @@ function loop(now: number): void {
     cursor.visible = !!hand;
     if (hand) {
       landmarkToWorld(hand, LM.INDEX_TIP, cursor.position);
-      const pinching = pinchRatio(hand.landmarks) < config.gestures.pinchOpen;
+      const pinching = handPinchRatio(hand.landmarks, hand.world) < config.gestures.pinchOpen;
       (cursor.material as THREE.MeshBasicMaterial).color.setHex(pinching ? 0x3dff7a : CURSOR_COLORS[i]);
     }
   });

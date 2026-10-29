@@ -16,6 +16,10 @@ function dist2(a: Landmark, b: Landmark): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function dist3(a: Landmark, b: Landmark): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
 /** 2D distance wrist -> middle MCP: a robust per-frame hand-size normalizer. */
 export function handSize(lm: HandLandmarks): number {
   return dist2(lm[LM.WRIST], lm[LM.MIDDLE_MCP]);
@@ -26,6 +30,21 @@ export function pinchRatio(lm: HandLandmarks): number {
   const size = handSize(lm);
   if (size <= 1e-9) return Infinity;
   return dist2(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]) / size;
+}
+
+/**
+ * 3D thumb tip <-> index tip distance divided by 3D palm size. Fed MediaPipe world landmarks it
+ * is unaffected by foreshortening, so pinches register even with the hand edge-on to the camera.
+ */
+export function pinchRatio3D(lm: HandLandmarks): number {
+  const size = dist3(lm[LM.WRIST], lm[LM.MIDDLE_MCP]);
+  if (size <= 1e-9) return Infinity;
+  return dist3(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]) / size;
+}
+
+/** Best available pinch ratio for a hand: 3D world landmarks when present, else 2D image ones. */
+export function handPinchRatio(lm: HandLandmarks, world?: HandLandmarks): number {
+  return world ? pinchRatio3D(world) : pinchRatio(lm);
 }
 
 /** Midpoint of thumb tip and index tip: where grabbed objects attach. */
@@ -87,25 +106,36 @@ function deadzone(v: number, dz: number): number {
 
 export type PinchEvent = { pinching: boolean; started: boolean; ended: boolean };
 
-/** Pinch state machine with hysteresis: closes below `close`, opens above `open`. */
+/**
+ * Pinch state machine with hysteresis: closes below `close`, opens above `open`, and only after
+ * `releaseFrames` consecutive open frames so one noisy frame can't drop a drag.
+ */
 export class PinchDetector {
   private pinching = false;
+  private openFrames = 0;
 
   constructor(
     private readonly close: number = config.gestures.pinchClose,
     private readonly open: number = config.gestures.pinchOpen,
+    private readonly releaseFrames: number = config.gestures.pinchReleaseFrames,
   ) {}
 
-  /** Feed one frame of landmarks (null = hand lost, which ends an active pinch). */
-  update(lm: HandLandmarks | null): PinchEvent {
+  /**
+   * Feed one frame of landmarks (null = hand lost, which ends an active pinch).
+   * Pass the hand's world landmarks too when available for an orientation-independent ratio.
+   */
+  update(lm: HandLandmarks | null, world?: HandLandmarks): PinchEvent {
     const was = this.pinching;
     if (lm === null) {
       this.pinching = false;
     } else {
-      const r = pinchRatio(lm);
+      const r = handPinchRatio(lm, world);
       if (!was && r < this.close) this.pinching = true;
-      else if (was && r > this.open) this.pinching = false;
+      else if (was && r > this.open) {
+        if (++this.openFrames >= this.releaseFrames) this.pinching = false;
+      } else this.openFrames = 0;
     }
+    if (!this.pinching) this.openFrames = 0;
     return { pinching: this.pinching, started: !was && this.pinching, ended: was && !this.pinching };
   }
 
@@ -115,6 +145,7 @@ export class PinchDetector {
 
   reset(): void {
     this.pinching = false;
+    this.openFrames = 0;
   }
 }
 

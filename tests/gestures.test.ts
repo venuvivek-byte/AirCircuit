@@ -10,6 +10,7 @@ import {
   palmTilt,
   pinchPoint,
   pinchRatio,
+  pinchRatio3D,
   twoHandTwist,
   wristRoll,
 } from '../src/tracking/gestures';
@@ -122,6 +123,13 @@ describe('geometry', () => {
     }
   });
 
+  it('pinchRatio3D counts depth separation that 2D misses', () => {
+    const lm = makeHand({ gap: 0.1 });
+    const deep = lm.map((p, i) => (i === LM.THUMB_TIP ? { ...p, z: p.z + 0.15 } : p));
+    expect(pinchRatio(deep)).toBeCloseTo(pinchRatio(lm), 9);
+    expect(pinchRatio3D(deep)).toBeGreaterThan(pinchRatio3D(lm) + 0.5);
+  });
+
   it('pinchPoint is the thumb/index tip midpoint', () => {
     const lm = makeHand({ gap: 0.2 });
     const p = pinchPoint(lm);
@@ -132,7 +140,7 @@ describe('geometry', () => {
 
 describe('PinchDetector', () => {
   it('opens/closes with hysteresis and fires start/end once', () => {
-    const d = new PinchDetector(0.35, 0.5);
+    const d = new PinchDetector(0.35, 0.5, 1);
     expect(d.update(makeHand({ gap: 0.8 }))).toEqual({ pinching: false, started: false, ended: false });
     // between thresholds while open: stays open
     expect(d.update(makeHand({ gap: 0.42 })).pinching).toBe(false);
@@ -153,6 +161,25 @@ describe('PinchDetector', () => {
     expect(d.update(makeHand({ gap: 0.6 })).ended).toBe(false);
     // oscillate again while open: stays open
     for (let i = 0; i < 20; i++) expect(d.update(makeHand({ gap: i % 2 ? 0.36 : 0.49 })).pinching).toBe(false);
+  });
+
+  it('needs several consecutive open frames to release (no flicker drops)', () => {
+    const d = new PinchDetector(0.35, 0.5, 3);
+    d.update(makeHand({ gap: 0.2 }));
+    // single noisy open frames between closed ones never release
+    for (let i = 0; i < 10; i++) {
+      expect(d.update(makeHand({ gap: 0.7 })).pinching).toBe(true);
+      expect(d.update(makeHand({ gap: 0.3 })).pinching).toBe(true);
+    }
+    expect(d.update(makeHand({ gap: 0.7 })).pinching).toBe(true);
+    expect(d.update(makeHand({ gap: 0.7 })).pinching).toBe(true);
+    expect(d.update(makeHand({ gap: 0.7 }))).toEqual({ pinching: false, started: false, ended: true });
+  });
+
+  it('uses world landmarks when given', () => {
+    const d = new PinchDetector(0.35, 0.5, 1);
+    // image landmarks look open, world (true 3D) says closed: world wins
+    expect(d.update(makeHand({ gap: 0.8 }), makeHand({ gap: 0.2 })).started).toBe(true);
   });
 
   it('losing the hand ends an active pinch', () => {

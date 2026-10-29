@@ -6,6 +6,7 @@ import type { TrackedHand } from './types';
 export class HandTracker {
   private landmarker: HandLandmarker | null = null;
   private lastTimestamp = -1;
+  private lastVideoTime = -1;
   delegate: 'GPU' | 'CPU' = 'GPU';
 
   async init(): Promise<void> {
@@ -33,8 +34,11 @@ export class HandTracker {
     return this.landmarker !== null;
   }
 
-  detect(video: HTMLVideoElement, now: number): TrackedHand[] {
+  /** Returns null when the video has no new frame since the last call (render loop outpaces the camera). */
+  detect(video: HTMLVideoElement, now: number): TrackedHand[] | null {
     if (!this.landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return [];
+    if (video.currentTime === this.lastVideoTime) return null;
+    this.lastVideoTime = video.currentTime;
     // MediaPipe requires strictly increasing timestamps.
     const ts = Math.max(now, this.lastTimestamp + 1);
     this.lastTimestamp = ts;
@@ -42,6 +46,7 @@ export class HandTracker {
     return result.landmarks.map((lms, i) => ({
       landmarks: lms.map((p) => ({ x: 1 - p.x, y: p.y, z: p.z })),
       handedness: (result.handedness[i]?.[0]?.categoryName as 'Left' | 'Right') ?? 'Right',
+      world: result.worldLandmarks[i]?.map((p) => ({ x: -p.x, y: p.y, z: p.z })),
     }));
   }
 }

@@ -3,12 +3,57 @@
 import { config } from '../config';
 import { LM, type HandLandmarks, type TrackedHand } from './types';
 
-export function emaLandmarks(prev: HandLandmarks, next: HandLandmarks, alpha: number): HandLandmarks {
-  return next.map((p, i) => ({
-    x: prev[i].x + alpha * (p.x - prev[i].x),
-    y: prev[i].y + alpha * (p.y - prev[i].y),
-    z: prev[i].z + alpha * (p.z - prev[i].z),
-  }));
+export interface OneEuroParams {
+  minCutoff: number;
+  beta: number;
+  dCutoff: number;
+}
+
+function smoothingFactor(dtSec: number, cutoffHz: number): number {
+  const tau = 1 / (2 * Math.PI * cutoffHz);
+  return 1 / (1 + tau / dtSec);
+}
+
+/** Scalar One Euro filter (Casiez, Roussel, Vogel 2012): speed-adaptive low-pass. */
+export class OneEuroFilter {
+  private x: number | null = null;
+  private dx = 0;
+  private t = 0;
+
+  constructor(private p: OneEuroParams) {}
+
+  filter(value: number, tMs: number): number {
+    if (this.x === null) {
+      this.x = value;
+      this.t = tMs;
+      return value;
+    }
+    const dt = Math.max((tMs - this.t) / 1000, 1e-3);
+    this.t = tMs;
+    this.dx += smoothingFactor(dt, this.p.dCutoff) * ((value - this.x) / dt - this.dx);
+    const cutoff = this.p.minCutoff + this.p.beta * Math.abs(this.dx);
+    this.x += smoothingFactor(dt, cutoff) * (value - this.x);
+    return this.x;
+  }
+}
+
+/** One Euro filters for every coordinate of a landmark set. */
+export class LandmarkFilter {
+  private filters: OneEuroFilter[] = [];
+
+  constructor(private p: OneEuroParams) {}
+
+  filter(lms: HandLandmarks, tMs: number): HandLandmarks {
+    return lms.map((pt, i) => {
+      const k = i * 3;
+      while (this.filters.length < k + 3) this.filters.push(new OneEuroFilter(this.p));
+      return {
+        x: this.filters[k].filter(pt.x, tMs),
+        y: this.filters[k + 1].filter(pt.y, tMs),
+        z: this.filters[k + 2].filter(pt.z, tMs),
+      };
+    });
+  }
 }
 
 export function lerpLandmarks(a: HandLandmarks, b: HandLandmarks, t: number): HandLandmarks {
@@ -44,30 +89,68 @@ export function matchHands(prev: TrackedHand[], next: TrackedHand[]): number[] {
   });
 }
 
+interface HandSlot {
+  hand: TrackedHand;
+  prev: TrackedHand;
+  filter: LandmarkFilter;
+  worldFilter: LandmarkFilter;
+  lastSeen: number;
+}
+
 /**
- * EMA-smooths each tracking sample and, when tracking runs every N frames,
+ * One-Euro-filters each tracking sample and, when tracking runs every N frames,
  * linearly interpolates between the last two samples on the skipped frames.
- * Hands are kept in a stable order across samples via wrist matching.
+ * Hands keep a stable slot order across samples via wrist matching (slot 0 stays primary),
+ * and a hand MediaPipe briefly loses is held for `graceMs` so drags survive dropouts.
  */
 export class HandSmoother {
-  private prev: TrackedHand[] = [];
-  private curr: TrackedHand[] = [];
+  private slots: HandSlot[] = [];
   private framesSinceSample = 0;
 
-  constructor(private alpha = config.tracking.smoothingAlpha) {}
+  constructor(
+    private params: OneEuroParams = config.tracking.oneEuro,
+    private graceMs = config.tracking.handLostGraceMs,
+  ) {}
 
-  /** Feed a fresh detection result. */
-  addSample(hands: TrackedHand[]): void {
-    const matches = matchHands(this.curr, hands);
-    const smoothed = hands.map((h, i) => {
-      const m = matches[i];
-      return m >= 0
-        ? { handedness: h.handedness, landmarks: emaLandmarks(this.curr[m].landmarks, h.landmarks, this.alpha) }
-        : h;
+  /** Feed a fresh detection result taken at time `now` (ms). */
+  addSample(hands: TrackedHand[], now: number): void {
+    const matches = matchHands(
+      this.slots.map((s) => s.hand),
+      hands,
+    );
+    const next: HandSlot[] = [];
+    this.slots.forEach((slot, i) => {
+      const j = matches.indexOf(i);
+      if (j >= 0) {
+        const h = hands[j];
+        next.push({
+          ...slot,
+          prev: slot.hand,
+          hand: {
+            handedness: h.handedness,
+            landmarks: slot.filter.filter(h.landmarks, now),
+            world: h.world && slot.worldFilter.filter(h.world, now),
+          },
+          lastSeen: now,
+        });
+      } else if (now - slot.lastSeen < this.graceMs) {
+        next.push({ ...slot, prev: slot.hand });
+      }
     });
-    // Previous sample re-ordered to line up with the new hands, for interpolation.
-    this.prev = smoothed.map((h, i) => (matches[i] >= 0 ? this.curr[matches[i]] : h));
-    this.curr = smoothed;
+    hands.forEach((h, j) => {
+      if (matches[j] >= 0) return;
+      const slot: HandSlot = {
+        hand: h,
+        prev: h,
+        filter: new LandmarkFilter(this.params),
+        worldFilter: new LandmarkFilter(this.params),
+        lastSeen: now,
+      };
+      slot.filter.filter(h.landmarks, now);
+      if (h.world) slot.worldFilter.filter(h.world, now);
+      next.push(slot);
+    });
+    this.slots = next;
     this.framesSinceSample = 0;
   }
 
@@ -77,10 +160,10 @@ export class HandSmoother {
     // On the sample frame t = 1/n, reaching the latest sample on the frame before the next one.
     const t = Math.min(1, (this.framesSinceSample + 1) / n);
     this.framesSinceSample++;
-    if (n === 1 || t >= 1) return this.curr;
-    return this.curr.map((h, i) => ({
-      handedness: h.handedness,
-      landmarks: lerpLandmarks(this.prev[i].landmarks, h.landmarks, t),
+    if (n === 1 || t >= 1) return this.slots.map((s) => s.hand);
+    return this.slots.map(({ hand, prev }) => ({
+      ...hand,
+      landmarks: lerpLandmarks(prev.landmarks, hand.landmarks, t),
     }));
   }
 }
