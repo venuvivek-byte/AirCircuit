@@ -3,7 +3,8 @@ import { config } from './config';
 import { startWebcam } from './camera/webcam';
 import { Board } from './components/board';
 import { HandTracker } from './tracking/handTracker';
-import { handSize } from './tracking/gestures';
+import { handSize, pinchRatio } from './tracking/gestures';
+import { HandControl } from './scene/handControl';
 import { HandSmoother, TrackingRateController } from './tracking/smoothing';
 import { LM, type TrackedHand } from './tracking/types';
 import { SceneManager } from './scene/sceneManager';
@@ -68,7 +69,8 @@ canvas.addEventListener(
 );
 
 // ---- Hand cursors ----
-const cursors = [0xffd23f, 0xff5fa2].map((color) => {
+const CURSOR_COLORS = [0xffd23f, 0xff5fa2];
+const cursors = CURSOR_COLORS.map((color) => {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshBasicMaterial({ color }));
   m.visible = false;
   sceneManager.scene.add(m);
@@ -84,6 +86,38 @@ function landmarkToScreen(hand: TrackedHand, index: number): { px: number; py: n
 function landmarkToWorld(hand: TrackedHand, index: number, target: THREE.Vector3): THREE.Vector3 {
   const { px, py } = landmarkToScreen(hand, index);
   return sceneManager.screenToWorld(px, py, handDepthZ(handSize(hand.landmarks)), target);
+}
+
+// ---- Hand input ----
+const handControl = new HandControl((x, y) =>
+  videoToScreen(x, y, video.videoWidth, video.videoHeight, window.innerWidth, window.innerHeight),
+);
+/** True while a pinch that started on a toolbar button is held, so it doesn't also grab. */
+let pinchOnUi = false;
+let handHoverButton: HTMLElement | null = null;
+
+function uiButtonAt(px: number, py: number): HTMLElement | null {
+  const el = document.elementFromPoint(px, py);
+  return el instanceof HTMLElement && el.closest('button') ? (el.closest('button') as HTMLElement) : null;
+}
+
+function updateHandInput(hands: TrackedHand[]): void {
+  const frame = handControl.update(hands, !!interaction.grabbed);
+  const button = frame.pointer ? uiButtonAt(frame.pointer.px, frame.pointer.py) : null;
+
+  if (button !== handHoverButton) {
+    handHoverButton?.classList.remove('hand-hover');
+    button?.classList.add('hand-hover');
+    handHoverButton = button;
+  }
+  if (frame.pinch.started && button) {
+    button.click();
+    pinchOnUi = true;
+  }
+  if (!frame.pinch.pinching) pinchOnUi = false;
+
+  interaction.update(frame.pointer && (pinchOnUi ? { ...frame.pointer, down: false } : frame.pointer));
+  if (frame.rotation) interaction.rotateGrabbed(frame.rotation.yaw, frame.rotation.pitch);
 }
 
 function pinLabel(hit: PinHit): string {
@@ -132,11 +166,18 @@ function loop(now: number): void {
   cursors.forEach((cursor, i) => {
     const hand = hands[i];
     cursor.visible = !!hand;
-    if (hand) landmarkToWorld(hand, LM.INDEX_TIP, cursor.position);
+    if (hand) {
+      landmarkToWorld(hand, LM.INDEX_TIP, cursor.position);
+      const pinching = pinchRatio(hand.landmarks) < config.gestures.pinchOpen;
+      (cursor.material as THREE.MeshBasicMaterial).color.setHex(pinching ? 0x3dff7a : CURSOR_COLORS[i]);
+    }
   });
 
-  // Hand-driven pointer is added in milestone 4; mouse mode drives it now.
-  interaction.update(status.input === 'mouse' && mouseInside ? mouse : null);
+  if (status.input === 'mouse') {
+    interaction.update(mouseInside ? mouse : null);
+  } else {
+    updateHandInput(hands);
+  }
 
   if (interaction.hoverPin) {
     const p = interaction.hoverPin.component.pinWorld(interaction.hoverPin.pin);
