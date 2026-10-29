@@ -55,6 +55,10 @@ export class Interaction {
     return this.mode.kind === 'grab' ? this.mode.component : null;
   }
 
+  get action(): Mode['kind'] {
+    return this.mode.kind;
+  }
+
   get busy(): boolean {
     return this.mode.kind !== 'idle';
   }

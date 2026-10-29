@@ -15,7 +15,7 @@ import { SceneManager } from './scene/sceneManager';
 import { Interaction, type PointerState } from './scene/interaction';
 import { handDepthZ, videoToScreen } from './scene/mapping';
 import { World, type PinHit } from './scene/world';
-import { FpsCounter, MessagesPanel, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
+import { FpsCounter, HintBar, MessagesPanel, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
 import { ControlButtons, type ControlAction } from './ui/controls';
 import { validate, type ValidationMessage } from './sim/validator';
 
@@ -41,6 +41,7 @@ const status: StatusInfo = {
 };
 
 const messagesPanel = new MessagesPanel(document.getElementById('messages')!);
+const hintBar = new HintBar(document.getElementById('hint')!);
 const controls = new ControlButtons(sceneManager, (a) => onControl(a));
 
 // Dev-only handle for automated browser checks.
@@ -266,6 +267,15 @@ function loop(now: number): void {
   } else {
     tooltip.hide();
   }
+
+  hintBar.update({
+    input: status.input,
+    camera: status.camera,
+    tracker: status.tracker,
+    handCount: hands.length,
+    componentCount: world.components.length,
+    action: interaction.action,
+  });
 
   sceneManager.render();
   statusPanel.update(status);

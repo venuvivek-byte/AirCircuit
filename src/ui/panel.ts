@@ -85,6 +85,51 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
 
+export interface HintState {
+  input: 'hand' | 'mouse';
+  camera: StatusInfo['camera'];
+  tracker: StatusInfo['tracker'];
+  handCount: number;
+  componentCount: number;
+  action: 'idle' | 'grab' | 'wire' | 'holdWire';
+}
+
+/** One-line contextual onboarding hint at the bottom of the screen. */
+export class HintBar {
+  private last = '';
+
+  constructor(private el: HTMLElement) {}
+
+  update(s: HintState): void {
+    const [text, warn] = hintFor(s);
+    const key = `${warn}|${text}`;
+    if (key === this.last) return;
+    this.last = key;
+    this.el.textContent = text;
+    this.el.classList.toggle('warn', warn);
+  }
+}
+
+function hintFor(s: HintState): [string, boolean] {
+  if (s.input === 'mouse') {
+    if (s.camera === 'error') return ['Camera unavailable: mouse mode. Drag parts, drag pin→pin to wire, R rotates, Delete removes, Enter runs.', true];
+    if (s.action === 'wire') return ['Release on another pin to connect the wire.', false];
+    if (s.action === 'grab') return ['Drop near the breadboard to plug in · wheel / R rotates · drop on the trash to delete.', false];
+    if (s.componentCount === 0) return ['Mouse mode: click a part on the left to spawn it.', false];
+    return ['Drag parts · drag pin→pin to wire · R / wheel rotate · Delete removes · Enter run · Space stop · M hands', false];
+  }
+  if (s.camera === 'starting') return ['Waiting for camera permission…', false];
+  if (s.camera === 'error') return ['Camera blocked or missing. Allow camera access and reload, or press M for mouse mode.', true];
+  if (s.tracker === 'loading') return ['Loading hand tracking model…', false];
+  if (s.tracker === 'error') return ['Hand tracking failed to load. Press M to use mouse mode.', true];
+  if (s.handCount === 0) return ['Show your hand to the camera (about 50 cm away, good light).', false];
+  if (s.action === 'wire') return ['Keep pinching and move to another pin, then open your fingers to connect.', false];
+  if (s.action === 'grab') return ['Move to place · roll your wrist to rotate · open fingers to drop (snaps into breadboard) · drop on the trash to delete.', false];
+  if (s.action === 'holdWire') return ['Drop the wire on the trash to delete it, or open fingers to keep it.', false];
+  if (s.componentCount === 0) return ['Point at a part on the left and pinch (thumb + index) to spawn it.', false];
+  return ['Pinch a part to grab it · pinch a pin and drag to another pin to wire · push a button with your fingertip to Run.', false];
+}
+
 export interface StatusInfo {
   input: 'hand' | 'mouse';
   fps: number;

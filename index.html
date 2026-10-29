@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AR Electronics Simulator</title>
+    <title>AirCircuit</title>
+    <link rel="icon" href="data:," />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
       #video {
@@ -45,6 +46,12 @@
         border: 2px dashed rgba(255,120,120,0.7); border-radius: 10px;
         background: rgba(60, 0, 0, 0.45); color: #ffb3b3; font-size: 13px; pointer-events: none;
       }
+      #hint {
+        position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: 70vw;
+        padding: 10px 16px; border-radius: 22px; pointer-events: none; text-align: center;
+        background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 15px;
+      }
+      #hint.warn { background: rgba(140, 40, 0, 0.8); }
       #trash.active { background: rgba(200, 30, 30, 0.7); color: #fff; }
     </style>
   </head>
@@ -57,6 +64,7 @@
       <div id="messages"></div>
     </div>
     <div id="tooltip"></div>
+    <div id="hint"></div>
     <div id="trash">🗑 Drop here<br>to delete</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
