@@ -45,6 +45,13 @@ export const config = {
     // After aligning, every leg must be this close to a hole.
     legTolerance: 0.03,
   },
+  controls: {
+    // Scene-space placement of the Run / Stop / Reset buttons (above the workspace).
+    y: 1.75,
+    z: 0.3,
+    spacing: 0.85,
+    size: [0.75, 0.32, 0.15] as [number, number, number],
+  },
   interaction: {
     // Screen-space radius for hovering / picking a pin.
     pinPickRadiusPx: 16,

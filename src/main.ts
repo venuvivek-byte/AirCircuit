@@ -15,7 +15,9 @@ import { SceneManager } from './scene/sceneManager';
 import { Interaction, type PointerState } from './scene/interaction';
 import { handDepthZ, videoToScreen } from './scene/mapping';
 import { World, type PinHit } from './scene/world';
-import { FpsCounter, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
+import { FpsCounter, MessagesPanel, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
+import { ControlButtons, type ControlAction } from './ui/controls';
+import { validate, type ValidationMessage } from './sim/validator';
 
 const video = document.getElementById('video') as HTMLVideoElement;
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
@@ -38,8 +40,11 @@ const status: StatusInfo = {
   input: 'hand', fps: 0, camera: 'starting', tracker: 'loading', handCount: 0, trackingEveryNFrames: 1,
 };
 
+const messagesPanel = new MessagesPanel(document.getElementById('messages')!);
+const controls = new ControlButtons(sceneManager, (a) => onControl(a));
+
 // Dev-only handle for automated browser checks.
-if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction } });
+if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction, controls } });
 
 new Toolbar(document.getElementById('toolbar')!, (action) => world.spawn(action));
 
@@ -58,7 +63,12 @@ window.addEventListener('keydown', (e) => {
     interaction.rotateStep(e.shiftKey ? -config.interaction.mouseRotateStepRad : config.interaction.mouseRotateStepRad);
   }
   if (status.input === 'mouse' && (e.key === 'Delete' || e.key === 'Backspace')) interaction.deleteHovered();
-  if (e.key === 'Enter') toggleRun();
+  if (e.key === 'Enter') onControl('run');
+  if (e.key === ' ') {
+    e.preventDefault();
+    onControl('stop');
+  }
+  if (e.key === 'n' || e.key === 'N') onControl('reset');
 });
 // Track on window so dragging across the toolbar doesn't cancel an action.
 window.addEventListener('pointermove', (e) => {
@@ -68,7 +78,10 @@ window.addEventListener('pointermove', (e) => {
 });
 document.documentElement.addEventListener('pointerleave', () => (mouseInside = false));
 canvas.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) mouse.down = true;
+  if (e.button !== 0) return;
+  // A click on a 3D control button is not a grab.
+  if (controls.click(e.clientX, e.clientY)) return;
+  mouse.down = true;
 });
 window.addEventListener('pointerup', (e) => {
   if (e.button === 0) mouse.down = false;
@@ -127,9 +140,22 @@ function updateHandInput(hands: TrackedHand[]): void {
     button?.classList.add('hand-hover');
     handHoverButton = button;
   }
-  if (frame.pinch.started && button) {
-    button.click();
-    pinchOnUi = true;
+  if (frame.pinch.started && frame.pointer && !interaction.busy) {
+    if (button) {
+      button.click();
+      pinchOnUi = true;
+    } else if (controls.click(frame.pointer.px, frame.pointer.py)) {
+      pinchOnUi = true;
+    }
+  }
+
+  // Fingertip press on the 3D buttons (index tip, depth from palm size).
+  const primary = hands[0];
+  if (primary && !interaction.busy) {
+    const { px, py } = landmarkToScreen(primary, LM.INDEX_TIP);
+    controls.updateFingertip({ px, py, z: handDepthZ(handSize(primary.landmarks)) });
+  } else {
+    controls.updateFingertip(null);
   }
   if (!frame.pinch.pinching) pinchOnUi = false;
 
@@ -137,25 +163,35 @@ function updateHandInput(hands: TrackedHand[]): void {
   if (frame.rotation) interaction.rotateGrabbed(frame.rotation.yaw, frame.rotation.pitch);
 }
 
-// ---- Simulation ----
+// ---- Simulation + validator ----
 const simulator = new Simulator();
 let circuit: Circuit = world.toCircuit();
 let netlist: Netlist = buildNetlist(circuit);
+let messages: ValidationMessage[] = [];
 let circuitVersion = -1;
 
-function toggleRun(): void {
-  if (simulator.running) simulator.stop();
-  else simulator.start(performance.now());
+function onControl(action: ControlAction): void {
+  if (action === 'run') simulator.start(performance.now());
+  else if (action === 'stop') simulator.stop();
+  else {
+    simulator.reset();
+    interaction.update(null);
+    world.clear();
+  }
 }
 
 function updateSimulation(now: number): void {
+  // Re-validate live whenever wiring or placement changes.
   if (world.version !== circuitVersion) {
     circuitVersion = world.version;
     circuit = world.toCircuit();
     netlist = buildNetlist(circuit);
+    messages = validate(circuit, netlist);
   }
   const states = simulator.step(now, circuit, netlist);
   for (const c of world.components) if (c instanceof Led) c.setLit(states.get(c.id) ?? false);
+  controls.setRunning(simulator.running);
+  messagesPanel.update(messages, simulator.running, world.components.some((c) => c.type === 'led'));
 }
 
 function pinLabel(hit: PinHit): string {
@@ -213,6 +249,7 @@ function loop(now: number): void {
 
   if (status.input === 'mouse') {
     interaction.update(mouseInside ? mouse : null);
+    controls.updateFingertip(null);
   } else {
     updateHandInput(hands);
   }

@@ -1,4 +1,5 @@
 import { config } from '../config';
+import type { ValidationMessage } from '../sim/validator';
 
 /** Rolling-average FPS counter. */
 export class FpsCounter {
@@ -53,6 +54,35 @@ export class Tooltip {
   hide(): void {
     this.el.style.display = 'none';
   }
+}
+
+/** Validator messages, shown under the status panel. */
+export class MessagesPanel {
+  private lastHtml = '';
+
+  constructor(private el: HTMLElement) {}
+
+  update(messages: ValidationMessage[], running: boolean, hasLed: boolean): void {
+    const items = messages.map((m) => `<div class="msg ${m.level}">${escapeHtml(m.text)}</div>`);
+    if (items.length === 0) {
+      items.push(
+        `<div class="hint">${
+          hasLed
+            ? 'Wire: blink pin (D13 / GPIO2) → resistor → LED anode (+), cathode → GND.'
+            : 'Spawn a board, breadboard, resistor and LED from the left toolbar.'
+        }</div>`,
+      );
+    }
+    const html = `<h3>Circuit check · ${running ? 'RUNNING' : 'stopped'}</h3>${items.join('')}`;
+    if (html !== this.lastHtml) {
+      this.el.innerHTML = html;
+      this.lastHtml = html;
+    }
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
 
 export interface StatusInfo {
