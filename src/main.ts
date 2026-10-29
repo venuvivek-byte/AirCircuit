@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { config } from './config';
 import { startWebcam } from './camera/webcam';
 import { Board } from './components/board';
+import { Led } from './components/led';
+import { buildNetlist, type Netlist } from './sim/netlist';
+import { Simulator } from './sim/simulator';
+import type { Circuit } from './sim/types';
 import { HandTracker } from './tracking/handTracker';
 import { handSize, pinchRatio } from './tracking/gestures';
 import { HandControl } from './scene/handControl';
@@ -54,6 +58,7 @@ window.addEventListener('keydown', (e) => {
     interaction.rotateStep(e.shiftKey ? -config.interaction.mouseRotateStepRad : config.interaction.mouseRotateStepRad);
   }
   if (status.input === 'mouse' && (e.key === 'Delete' || e.key === 'Backspace')) interaction.deleteHovered();
+  if (e.key === 'Enter') toggleRun();
 });
 // Track on window so dragging across the toolbar doesn't cancel an action.
 window.addEventListener('pointermove', (e) => {
@@ -132,6 +137,27 @@ function updateHandInput(hands: TrackedHand[]): void {
   if (frame.rotation) interaction.rotateGrabbed(frame.rotation.yaw, frame.rotation.pitch);
 }
 
+// ---- Simulation ----
+const simulator = new Simulator();
+let circuit: Circuit = world.toCircuit();
+let netlist: Netlist = buildNetlist(circuit);
+let circuitVersion = -1;
+
+function toggleRun(): void {
+  if (simulator.running) simulator.stop();
+  else simulator.start(performance.now());
+}
+
+function updateSimulation(now: number): void {
+  if (world.version !== circuitVersion) {
+    circuitVersion = world.version;
+    circuit = world.toCircuit();
+    netlist = buildNetlist(circuit);
+  }
+  const states = simulator.step(now, circuit, netlist);
+  for (const c of world.components) if (c instanceof Led) c.setLit(states.get(c.id) ?? false);
+}
+
 function pinLabel(hit: PinHit): string {
   const c = hit.component;
   if (c instanceof Board) return `${c.def.label} · ${hit.pin}`;
@@ -190,6 +216,8 @@ function loop(now: number): void {
   } else {
     updateHandInput(hands);
   }
+
+  updateSimulation(now);
 
   const pointer = status.input === 'mouse' ? (mouseInside ? mouse : null) : lastHandPointer;
   trashEl.classList.toggle('active', interaction.busy && !!pointer && isOverTrash(pointer.px, pointer.py));
