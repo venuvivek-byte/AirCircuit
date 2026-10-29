@@ -126,10 +126,10 @@ function hintFor(s: HintState): [string, boolean] {
   if (s.tracker === 'error') return ['Hand tracking failed to load. Press M to use mouse mode.', true];
   if (s.handCount === 0) return ['Show your hand to the camera (about 50 cm away, good light).', false];
   if (s.action === 'wire') return ['Keep pinching and move to another pin, then open your fingers to connect.', false];
-  if (s.action === 'grab') return ['Move to place · roll your wrist to rotate · open fingers to drop (snaps into breadboard) · drop on the trash to delete.', false];
+  if (s.action === 'grab') return ['Move your fist to carry · roll your wrist to rotate · open your hand to drop (snaps into breadboard) · drop on the trash to delete.', false];
   if (s.action === 'holdWire') return ['Drop the wire on the trash to delete it, or open fingers to keep it.', false];
-  if (s.componentCount === 0) return ['Point at a part on the left and pinch (thumb + index) to spawn it.', false];
-  return ['Pinch a part to grab it · pinch a pin and drag to another pin to wire · push a button with your fingertip to Run.', false];
+  if (s.componentCount === 0) return ['Hold your index fingertip on a part in the left toolbar for 5 s to spawn it.', false];
+  return ['Palm over a part + make a FIST to grab · roll wrist to rotate · PINCH a pin to wire · fingertip on toolbar 5 s spawns · push a 3D button to Run.', false];
 }
 
 export interface StatusInfo {

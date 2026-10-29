@@ -43,17 +43,18 @@ If something is wrong, the panel says why:
 
 | Gesture | How | Does |
 |---|---|---|
-| **Pinch** | Touch thumb tip to index tip | Grab the part under your fingers, or press a toolbar button |
-| **Move** | Keep pinching and move your hand | Carry the grabbed part |
-| **Rotate** | Keep pinching and roll your wrist (tilt the palm to pitch). Or pinch with **both** hands and twist | Rotate the part |
-| **Release** | Open your fingers | Drop the part. Parts dropped near the breadboard snap into its holes |
-| **Wire** | Pinch on a pin, drag to another pin, release | Create a jumper wire |
-| **Press** | Point your index fingertip at a 3D button and push it toward the screen | Run / Stop / Reset |
-| **Delete** | Drop a part or a wire on the red **trash** box (bottom-left) | Remove it |
+| **Spawn** | Hold your index fingertip on a toolbar button for **5 s** (the button fills up and counts down) | Spawn that part |
+| **Grab** | Put your palm (orange ring) over a part and make a **fist** | Grab the part |
+| **Move** | Keep the fist and move your hand | Carry the grabbed part |
+| **Rotate** | Keep the fist and roll your wrist (tilt the palm to pitch). Or grip with **both** hands and twist | Rotate the part |
+| **Release** | Open your hand | Drop the part. Parts dropped near the breadboard snap into its holes |
+| **Wire** | **Pinch** (thumb + index) on a pin, drag to another pin, release | Create a jumper wire |
+| **Press** | Point your index fingertip at a 3D button and push it toward the screen, or pinch on it | Run / Stop / Reset |
+| **Delete** | Drop a part (fist) or a wire (pinch it) on the red **trash** box (bottom-left) | Remove it |
 
 Other tips:
 - Move the breadboard by pinching its **"grab here"** tab, since its holes start wires. Parts plugged into the breadboard move with it.
-- Your yellow fingertip cursor turns **green** while you pinch.
+- Your hand is drawn as a skeleton: joints turn **green** while you pinch and **orange** while you make a fist. The orange ring is the palm point a fist grabs with; the white dot between thumb and index is the pinch point used for wiring.
 - The bottom bar always shows a hint for what you can do next.
 - Tracking works best with your hand about 50 cm from the camera, in even light, against a plain background.
 

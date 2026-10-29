@@ -58,6 +58,8 @@ export const config = {
     // Screen-space radius for hovering / picking a pin.
     pinPickRadiusPx: 16,
     mouseRotateStepRad: Math.PI / 12,
+    // Hand mode: hold the index fingertip on a toolbar button this long to spawn it.
+    dwellSpawnMs: 5000,
   },
   fps: {
     // Window over which the FPS counter averages frame times (ms).
@@ -97,6 +99,16 @@ export const config = {
     pinchOpen: 0.5,
     // A pinch only releases after this many consecutive open frames (stops flicker drops mid-drag).
     pinchReleaseFrames: 3,
+    // A pinch only starts after this many consecutive closed frames, with the index finger
+    // reaching out (curl above pinchMinIndexCurl), so closing the hand into a fist never pinches.
+    pinchStartFrames: 2,
+    pinchMinIndexCurl: 1.0,
+    // Fist: every finger's curl (wrist->tip / wrist->PIP, 3D) below fistClose; opens when the
+    // mean curl rises above fistOpen for fistReleaseFrames frames.
+    fistClose: 1.0,
+    fistOpen: 1.2,
+    fistStartFrames: 2,
+    fistReleaseFrames: 3,
     // Wrist roll is measured relative to the roll at pinch start; ignore tiny changes.
     rollDeadzoneRad: 0.05,
     tiltDeadzoneRad: 0.05,

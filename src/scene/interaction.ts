@@ -6,11 +6,16 @@ import type { PinRef } from '../sim/types';
 import type { SceneManager } from './sceneManager';
 import type { PinHit, World } from './world';
 
-/** Input-agnostic pointer: driven by the mouse in mouse mode, by the pinch point in hand mode. */
+/** Hand grip: a fist grabs / moves / rotates components, a pinch draws wires. */
+export type Grip = 'fist' | 'pinch';
+
+/** Input-agnostic pointer: driven by the mouse in mouse mode, by the hand in hand mode. */
 export interface PointerState {
   px: number;
   py: number;
   down: boolean;
+  /** Hand mode only. Undefined (mouse) means one button does everything, by what is under it. */
+  grip?: Grip;
 }
 
 const LIFT = 0.15;
@@ -119,6 +124,17 @@ export class Interaction {
     this.world.updateWires();
   }
 
+  /** Abort the current action without dropping on the trash or connecting a wire. */
+  cancel(): void {
+    if (this.mode.kind === 'wire') {
+      this.mode = { kind: 'idle' };
+      this.preview.visible = false;
+    } else if (this.mode.kind !== 'idle') {
+      this.finish(null);
+    }
+    this.wasDown = false;
+  }
+
   /** Rotation relative to the orientation the component had when grabbed. */
   rotateGrabbed(yaw: number, pitch = 0): void {
     const c = this.grabbed;
@@ -160,6 +176,18 @@ export class Interaction {
     const hit = this.world.componentAt(p.px, p.py);
     const pin = this.world.pinAt(p.px, p.py);
     const ref = pin && { componentId: pin.component.id, pin: pin.pin };
+
+    if (p.grip === 'fist') {
+      // Fist: grab whatever part is under the palm (the breadboard anywhere on its body).
+      if (hit) this.startGrab(hit.component, p);
+      return;
+    }
+    if (p.grip === 'pinch') {
+      // Pinch: wires only. A pin starts a new wire; a highlighted wire is picked up (to trash it).
+      if (ref) this.mode = { kind: 'wire', from: ref };
+      else if (this.hoverWire) this.mode = { kind: 'holdWire', wire: this.hoverWire };
+      return;
+    }
 
     if (hit && hit.component.type !== 'breadboard') {
       // On a part: its own pin starts a wire, anywhere else grabs it.

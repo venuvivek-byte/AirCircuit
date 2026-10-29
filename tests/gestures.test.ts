@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FistDetector,
   PinchDetector,
+  fingerCurl,
+  palmCenter,
   PressDetector,
   RotationTracker,
   RuleBasedClassifier,
@@ -140,7 +143,7 @@ describe('geometry', () => {
 
 describe('PinchDetector', () => {
   it('opens/closes with hysteresis and fires start/end once', () => {
-    const d = new PinchDetector(0.35, 0.5, 1);
+    const d = new PinchDetector(0.35, 0.5, 1, 1);
     expect(d.update(makeHand({ gap: 0.8 }))).toEqual({ pinching: false, started: false, ended: false });
     // between thresholds while open: stays open
     expect(d.update(makeHand({ gap: 0.42 })).pinching).toBe(false);
@@ -164,7 +167,7 @@ describe('PinchDetector', () => {
   });
 
   it('needs several consecutive open frames to release (no flicker drops)', () => {
-    const d = new PinchDetector(0.35, 0.5, 3);
+    const d = new PinchDetector(0.35, 0.5, 3, 1);
     d.update(makeHand({ gap: 0.2 }));
     // single noisy open frames between closed ones never release
     for (let i = 0; i < 10; i++) {
@@ -177,7 +180,7 @@ describe('PinchDetector', () => {
   });
 
   it('uses world landmarks when given', () => {
-    const d = new PinchDetector(0.35, 0.5, 1);
+    const d = new PinchDetector(0.35, 0.5, 1, 1);
     // image landmarks look open, world (true 3D) says closed: world wins
     expect(d.update(makeHand({ gap: 0.8 }), makeHand({ gap: 0.2 })).started).toBe(true);
   });
@@ -185,6 +188,7 @@ describe('PinchDetector', () => {
   it('losing the hand ends an active pinch', () => {
     const d = new PinchDetector();
     d.update(makeHand({ gap: 0.1 }));
+    expect(d.update(makeHand({ gap: 0.1 })).started).toBe(true);
     expect(d.update(null)).toEqual({ pinching: false, started: false, ended: true });
     expect(d.update(null)).toEqual({ pinching: false, started: false, ended: false });
   });
@@ -280,5 +284,40 @@ describe('RuleBasedClassifier', () => {
     lm[LM.THUMB_TIP] = { ...lm[LM.INDEX_TIP], x: lm[LM.INDEX_TIP].x - 0.01 };
     expect(pinchRatio(lm)).toBeLessThan(0.35);
     expect(c.classify(lm)).toBe('fist');
+  });
+});
+
+describe('fist', () => {
+  it('fingerCurl is high for straight fingers and low when curled', () => {
+    expect(fingerCurl(makeHand({ curl: 0 }), 1)).toBeGreaterThan(1.3);
+    expect(fingerCurl(makeHand({ curl: 1 }), 1)).toBeLessThan(1);
+  });
+
+  it('palmCenter barely moves between open hand and fist', () => {
+    const a = palmCenter(makeHand({ curl: 0 }));
+    const b = palmCenter(makeHand({ curl: 1 }));
+    expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeLessThan(1e-9);
+  });
+
+  it('FistDetector closes after startFrames curled frames and opens after releaseFrames', () => {
+    const d = new FistDetector(1.0, 1.2, 2, 3);
+    expect(d.update(makeHand({ curl: 1 }))).toBe(false);
+    expect(d.update(makeHand({ curl: 1 }))).toBe(true);
+    // one noisy open frame does not release
+    expect(d.update(makeHand({ curl: 0 }))).toBe(true);
+    expect(d.update(makeHand({ curl: 1 }))).toBe(true);
+    d.update(makeHand({ curl: 0 }));
+    d.update(makeHand({ curl: 0 }));
+    expect(d.update(makeHand({ curl: 0 }))).toBe(false);
+  });
+
+  it('a pinch with other fingers curled is not a fist (index reaching)', () => {
+    const d = new FistDetector(1.0, 1.2, 1, 1);
+    expect(d.update(makeHand({ curls: [0.3, 1, 1, 1], gap: 0.1 }))).toBe(false);
+  });
+
+  it('closing into a fist never starts a pinch', () => {
+    const d = new PinchDetector(0.35, 0.5, 1, 1);
+    for (let i = 0; i < 5; i++) expect(d.update(makeHand({ curl: 1, gap: 0.1 })).pinching).toBe(false);
   });
 });

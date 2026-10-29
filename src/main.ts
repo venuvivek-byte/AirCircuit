@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { config } from './config';
 import { startWebcam } from './camera/webcam';
 import { Board } from './components/board';
@@ -7,16 +6,17 @@ import { buildNetlist, type Netlist } from './sim/netlist';
 import { Simulator } from './sim/simulator';
 import type { Circuit } from './sim/types';
 import { HandTracker } from './tracking/handTracker';
-import { handPinchRatio, handSize } from './tracking/gestures';
+import { handSize } from './tracking/gestures';
 import { HandControl } from './scene/handControl';
 import { HandSmoother, TrackingRateController } from './tracking/smoothing';
 import { LM, type TrackedHand } from './tracking/types';
 import { SceneManager } from './scene/sceneManager';
-import { Interaction, type PointerState } from './scene/interaction';
+import { Interaction, type Grip, type PointerState } from './scene/interaction';
 import { handDepthZ, videoToScreen } from './scene/mapping';
 import { World, type PinHit } from './scene/world';
 import { FpsCounter, HintBar, MessagesPanel, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
 import { ControlButtons, type ControlAction } from './ui/controls';
+import { SkeletonOverlay } from './ui/skeleton';
 import { validate, type ValidationMessage } from './sim/validator';
 
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -100,70 +100,76 @@ canvas.addEventListener(
   { passive: false },
 );
 
-// ---- Hand cursors ----
-const CURSOR_COLORS = [0xffd23f, 0xff5fa2];
-const cursors = CURSOR_COLORS.map((color) => {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshBasicMaterial({ color }));
-  m.visible = false;
-  sceneManager.scene.add(m);
-  return m;
-});
+// ---- Hand input ----
+const handToScreen = (x: number, y: number) =>
+  videoToScreen(x, y, video.videoWidth, video.videoHeight, window.innerWidth, window.innerHeight);
+const handControl = new HandControl(handToScreen);
+const skeleton = new SkeletonOverlay(document.getElementById('skeleton') as HTMLCanvasElement, handToScreen);
+let lastHandPointer: PointerState | null = null;
+let lastGrips: Array<Grip | null> = [];
 
 function landmarkToScreen(hand: TrackedHand, index: number): { px: number; py: number } {
   const p = hand.landmarks[index];
-  return videoToScreen(p.x, p.y, video.videoWidth, video.videoHeight, window.innerWidth, window.innerHeight);
+  return handToScreen(p.x, p.y);
 }
-
-/** World position of a landmark, using the palm size for depth. */
-function landmarkToWorld(hand: TrackedHand, index: number, target: THREE.Vector3): THREE.Vector3 {
-  const { px, py } = landmarkToScreen(hand, index);
-  return sceneManager.screenToWorld(px, py, handDepthZ(handSize(hand.landmarks)), target);
-}
-
-// ---- Hand input ----
-const handControl = new HandControl((x, y) =>
-  videoToScreen(x, y, video.videoWidth, video.videoHeight, window.innerWidth, window.innerHeight),
-);
-/** True while a pinch that started on a toolbar button is held, so it doesn't also grab. */
-let pinchOnUi = false;
-let handHoverButton: HTMLElement | null = null;
-let lastHandPointer: PointerState | null = null;
 
 function uiButtonAt(px: number, py: number): HTMLElement | null {
   const el = document.elementFromPoint(px, py);
   return el instanceof HTMLElement && el.closest('button') ? (el.closest('button') as HTMLElement) : null;
 }
 
-function updateHandInput(hands: TrackedHand[]): void {
+/** Hold the index fingertip on a toolbar button for `dwellSpawnMs` to press it (once per visit). */
+const dwell = { button: null as HTMLElement | null, since: 0, fired: false };
+
+function setDwell(button: HTMLElement | null, now: number): void {
+  if (button !== dwell.button) {
+    if (dwell.button) {
+      dwell.button.classList.remove('hand-hover');
+      dwell.button.style.removeProperty('--dwell');
+      delete dwell.button.dataset.dwell;
+    }
+    button?.classList.add('hand-hover');
+    Object.assign(dwell, { button, since: now, fired: false });
+  }
+  if (!button || dwell.fired) return;
+  const ms = config.interaction.dwellSpawnMs;
+  const progress = Math.min(1, (now - dwell.since) / ms);
+  button.style.setProperty('--dwell', progress.toFixed(3));
+  button.dataset.dwell = `${Math.ceil((ms - (now - dwell.since)) / 1000)}s`;
+  if (progress >= 1) {
+    dwell.fired = true;
+    button.click();
+    button.style.removeProperty('--dwell');
+    button.dataset.dwell = '✓';
+  }
+}
+
+function updateHandInput(hands: TrackedHand[], now: number): void {
   const frame = handControl.update(hands, !!interaction.grabbed);
   lastHandPointer = frame.pointer;
-  const button = frame.pointer ? uiButtonAt(frame.pointer.px, frame.pointer.py) : null;
-
-  if (button !== handHoverButton) {
-    handHoverButton?.classList.remove('hand-hover');
-    button?.classList.add('hand-hover');
-    handHoverButton = button;
-  }
-  if (frame.pinch.started && frame.pointer && !interaction.busy) {
-    if (button) {
-      button.click();
-      pinchOnUi = true;
-    } else if (controls.click(frame.pointer.px, frame.pointer.py)) {
-      pinchOnUi = true;
-    }
-  }
-
-  // Fingertip press on the 3D buttons (index tip, depth from palm size).
+  lastGrips = frame.grips;
   const primary = hands[0];
+
+  // Toolbar: point with the index fingertip (open hand) and hold still.
+  const tip = primary && frame.grip === null && !interaction.busy ? landmarkToScreen(primary, LM.INDEX_TIP) : null;
+  const button = tip ? uiButtonAt(tip.px, tip.py) : null;
+  setDwell(button?.closest('#toolbar') ? button : null, now);
+
+  // 3D Run / Stop / Reset: pinch on them, or push with the index fingertip (depth from palm size).
+  let onControl = false;
+  if (frame.gripStarted && frame.grip === 'pinch' && frame.pointer && !interaction.busy) {
+    onControl = controls.click(frame.pointer.px, frame.pointer.py);
+  }
   if (primary && !interaction.busy) {
     const { px, py } = landmarkToScreen(primary, LM.INDEX_TIP);
     controls.updateFingertip({ px, py, z: handDepthZ(handSize(primary.landmarks)) });
   } else {
     controls.updateFingertip(null);
   }
-  if (!frame.pinch.pinching) pinchOnUi = false;
 
-  interaction.update(frame.pointer && (pinchOnUi ? { ...frame.pointer, down: false } : frame.pointer));
+  // Closing a pinch into a fist (or back) switches tools: drop the half-done action.
+  if (frame.gripSwitched) interaction.cancel();
+  interaction.update(frame.pointer && (onControl ? { ...frame.pointer, down: false } : frame.pointer));
   if (frame.rotation) interaction.rotateGrabbed(frame.rotation.yaw, frame.rotation.pitch);
 }
 
@@ -269,21 +275,13 @@ function loop(now: number): void {
   const hands = smoother.frame(everyN);
   status.handCount = hands.length;
 
-  cursors.forEach((cursor, i) => {
-    const hand = hands[i];
-    cursor.visible = !!hand;
-    if (hand) {
-      landmarkToWorld(hand, LM.INDEX_TIP, cursor.position);
-      const pinching = handPinchRatio(hand.landmarks, hand.world) < config.gestures.pinchOpen;
-      (cursor.material as THREE.MeshBasicMaterial).color.setHex(pinching ? 0x3dff7a : CURSOR_COLORS[i]);
-    }
-  });
-
   if (status.input === 'mouse') {
     interaction.update(mouseInside ? mouse : null);
     controls.updateFingertip(null);
+    setDwell(null, now);
+    lastGrips = [];
   } else {
-    updateHandInput(hands);
+    updateHandInput(hands, now);
   }
 
   updateSimulation(now);
@@ -308,6 +306,7 @@ function loop(now: number): void {
     action: interaction.action,
   });
 
+  skeleton.draw(status.input === 'hand' ? hands : [], lastGrips);
   sceneManager.render();
   statusPanel.update(status);
   frameIndex++;

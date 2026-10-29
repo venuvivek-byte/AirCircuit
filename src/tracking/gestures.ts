@@ -113,11 +113,14 @@ export type PinchEvent = { pinching: boolean; started: boolean; ended: boolean }
 export class PinchDetector {
   private pinching = false;
   private openFrames = 0;
+  private closedFrames = 0;
 
   constructor(
     private readonly close: number = config.gestures.pinchClose,
     private readonly open: number = config.gestures.pinchOpen,
     private readonly releaseFrames: number = config.gestures.pinchReleaseFrames,
+    private readonly startFrames: number = config.gestures.pinchStartFrames,
+    private readonly minIndexCurl: number = config.gestures.pinchMinIndexCurl,
   ) {}
 
   /**
@@ -130,12 +133,16 @@ export class PinchDetector {
       this.pinching = false;
     } else {
       const r = handPinchRatio(lm, world);
-      if (!was && r < this.close) this.pinching = true;
-      else if (was && r > this.open) {
+      if (!was) {
+        const closed = r < this.close && fingerCurl(world ?? lm, 0) > this.minIndexCurl;
+        this.closedFrames = closed ? this.closedFrames + 1 : 0;
+        if (this.closedFrames >= this.startFrames) this.pinching = true;
+      } else if (r > this.open) {
         if (++this.openFrames >= this.releaseFrames) this.pinching = false;
       } else this.openFrames = 0;
     }
     if (!this.pinching) this.openFrames = 0;
+    else this.closedFrames = 0;
     return { pinching: this.pinching, started: !was && this.pinching, ended: was && !this.pinching };
   }
 
@@ -146,6 +153,7 @@ export class PinchDetector {
   reset(): void {
     this.pinching = false;
     this.openFrames = 0;
+    this.closedFrames = 0;
   }
 }
 
@@ -253,6 +261,72 @@ export class PressDetector {
 
   reset(): void {
     this.armed = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fist
+// ---------------------------------------------------------------------------
+
+/**
+ * How extended a finger is (0 = index .. 3 = pinky): 3D distance wrist->tip over wrist->PIP.
+ * About 1.5-2 when straight, below 1 when curled into the palm. Scale and orientation invariant.
+ */
+export function fingerCurl(lm: HandLandmarks, finger: 0 | 1 | 2 | 3): number {
+  const f = FINGERS[finger];
+  const w = lm[LM.WRIST];
+  const pip = dist3(w, lm[f.pip]);
+  return pip <= 1e-9 ? Infinity : dist3(w, lm[f.tip]) / pip;
+}
+
+/** Palm centre (wrist + four knuckles): stable whether the hand is open or a fist. */
+export function palmCenter(lm: HandLandmarks): Landmark {
+  const ids = [LM.WRIST, LM.INDEX_MCP, LM.MIDDLE_MCP, LM.RING_MCP, LM.PINKY_MCP];
+  const c = { x: 0, y: 0, z: 0 };
+  for (const i of ids) {
+    c.x += lm[i].x / ids.length;
+    c.y += lm[i].y / ids.length;
+    c.z += lm[i].z / ids.length;
+  }
+  return c;
+}
+
+/**
+ * Fist state machine: closes once every finger's curl is below `close` for `startFrames`
+ * frames, opens once the mean curl is above `open` for `releaseFrames` frames.
+ */
+export class FistDetector {
+  private active = false;
+  private count = 0;
+
+  constructor(
+    private readonly close: number = config.gestures.fistClose,
+    private readonly open: number = config.gestures.fistOpen,
+    private readonly startFrames: number = config.gestures.fistStartFrames,
+    private readonly releaseFrames: number = config.gestures.fistReleaseFrames,
+  ) {}
+
+  /** Feed one frame (null = hand lost, which ends the fist). Prefer world landmarks when available. */
+  update(lm: HandLandmarks | null): boolean {
+    if (lm === null) {
+      this.active = false;
+      this.count = 0;
+      return false;
+    }
+    const curls = [0, 1, 2, 3].map((i) => fingerCurl(lm, i as 0 | 1 | 2 | 3));
+    const flip = this.active
+      ? curls.reduce((a, b) => a + b, 0) / 4 > this.open
+      : curls.every((c) => c < this.close);
+    this.count = flip ? this.count + 1 : 0;
+    if (this.count >= (this.active ? this.releaseFrames : this.startFrames)) {
+      this.active = !this.active;
+      this.count = 0;
+    }
+    return this.active;
+  }
+
+  get isFist(): boolean {
+    return this.active;
   }
 }
 
