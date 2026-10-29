@@ -17,7 +17,46 @@ export class FpsCounter {
   }
 }
 
+export type ToolAction = 'arduino-uno' | 'esp32' | 'breadboard' | 'led' | 'resistor';
+
+const TOOLS: Array<[ToolAction, string]> = [
+  ['arduino-uno', 'Arduino Uno'],
+  ['esp32', 'ESP32'],
+  ['breadboard', 'Breadboard'],
+  ['led', 'LED'],
+  ['resistor', 'Resistor 220Ω'],
+];
+
+/** Left toolbar of spawn buttons. Buttons carry `data-action` so hand "clicks" can find them by hit-testing. */
+export class Toolbar {
+  constructor(el: HTMLElement, onAction: (a: ToolAction) => void) {
+    for (const [action, label] of TOOLS) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.dataset.action = action;
+      b.addEventListener('click', () => onAction(action));
+      el.appendChild(b);
+    }
+  }
+}
+
+/** Small floating label that follows the hovered pin. */
+export class Tooltip {
+  constructor(private el: HTMLElement) {}
+
+  show(text: string, px: number, py: number): void {
+    this.el.textContent = text;
+    this.el.style.transform = `translate(${px + 14}px, ${py - 28}px)`;
+    this.el.style.display = 'block';
+  }
+
+  hide(): void {
+    this.el.style.display = 'none';
+  }
+}
+
 export interface StatusInfo {
+  input: 'hand' | 'mouse';
   fps: number;
   camera: 'starting' | 'ok' | 'error';
   cameraError?: string;
@@ -44,7 +83,8 @@ export class StatusPanel {
         : `Hand tracking: ${info.tracker}${info.trackerDelegate ? ` (${info.trackerDelegate})` : ''}`;
     const mode =
       info.trackingEveryNFrames === 1 ? 'every frame' : `every ${info.trackingEveryNFrames} frames (interpolated)`;
-    const html = [cam, tracker, `Hands: ${info.handCount}`, `Tracking: ${mode}`, `FPS: ${info.fps.toFixed(0)}`].join('<br>');
+    const input = info.input === 'mouse' ? 'Input: mouse (press M for hands)' : 'Input: hands (press M for mouse)';
+    const html = [input, cam, tracker, `Hands: ${info.handCount}`, `Tracking: ${mode}`, `FPS: ${info.fps.toFixed(0)}`].join('<br>');
     // Avoid touching the DOM every frame when nothing changed.
     if (html !== this.lastHtml) {
       this.el.innerHTML = html;

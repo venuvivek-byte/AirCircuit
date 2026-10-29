@@ -3,9 +3,9 @@
 // Terminal strip: columns 1..COLUMNS, rows a-e (top half) and f-j (bottom half).
 // Holes a..e in one column are connected (a group of 5); f..j likewise.
 // Power rails: one '+' rail and one '-' rail, each a single connected strip.
-// Hole names: 'a1'..'j30' for the terminal strip, '+1'..'+30' and '-1'..'-30' for rails.
+// Hole names: 'a1'..'j20' for the terminal strip, '+1'..'+20' and '-1'..'-20' for rails.
 
-export const COLUMNS = 30;
+export const COLUMNS = 20;
 export const TOP_ROWS = ['a', 'b', 'c', 'd', 'e'] as const;
 export const BOTTOM_ROWS = ['f', 'g', 'h', 'i', 'j'] as const;
 export const RAILS = ['+', '-'] as const;

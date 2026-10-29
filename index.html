@@ -18,12 +18,27 @@
         pointer-events: none;
       }
       #status .err { color: #ff7b7b; }
+      #toolbar {
+        position: fixed; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 8px;
+      }
+      #toolbar button {
+        min-width: 140px; padding: 12px 14px; border: 1px solid rgba(255,255,255,0.25); border-radius: 8px;
+        background: rgba(20, 20, 30, 0.7); color: #fff; font-size: 14px; text-align: left; cursor: pointer;
+      }
+      #toolbar button:hover, #toolbar button.hand-hover { background: rgba(60, 130, 255, 0.75); }
+      #tooltip {
+        position: fixed; left: 0; top: 0; display: none; pointer-events: none;
+        padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,0.8); color: #ffe27a; font-size: 13px;
+      }
+      body.mouse-mode #scene { cursor: crosshair; }
     </style>
   </head>
   <body>
     <video id="video" autoplay playsinline muted></video>
     <canvas id="scene"></canvas>
+    <div id="toolbar"></div>
     <div id="status"></div>
+    <div id="tooltip"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

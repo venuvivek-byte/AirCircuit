@@ -12,6 +12,33 @@ export const config = {
     far: 100,
     cameraZ: 5,
   },
+  workspace: {
+    // Tilt of the virtual table toward the camera so component tops are visible.
+    tiltRad: 0.95,
+    y: 0.1,
+    scale: 0.8,
+  },
+  components: {
+    breadboardPitch: 0.15,
+    breadboardThickness: 0.12,
+    ledLegSpacing: 0.15,
+    resistorLegSpacing: 0.6,
+    // Workspace-local (x, z) spawn spot per kind; repeated spawns are offset diagonally.
+    spawnPositions: {
+      breadboard: [0, -0.3],
+      'arduino-uno': [-3.0, 0],
+      esp32: [2.6, 0],
+      led: [-0.6, 1.5],
+      resistor: [0.6, 1.5],
+    } as Record<string, [number, number]>,
+    spawnOffset: 0.25,
+    labelScale: 0.11,
+  },
+  interaction: {
+    // Screen-space radius for hovering / picking a pin.
+    pinPickRadiusPx: 16,
+    mouseRotateStepRad: Math.PI / 12,
+  },
   fps: {
     // Window over which the FPS counter averages frame times (ms).
     sampleWindowMs: 500,

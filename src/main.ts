@@ -1,31 +1,73 @@
 import * as THREE from 'three';
+import { config } from './config';
 import { startWebcam } from './camera/webcam';
+import { Board } from './components/board';
 import { HandTracker } from './tracking/handTracker';
+import { handSize } from './tracking/gestures';
 import { HandSmoother, TrackingRateController } from './tracking/smoothing';
 import { LM, type TrackedHand } from './tracking/types';
 import { SceneManager } from './scene/sceneManager';
+import { Interaction, type PointerState } from './scene/interaction';
 import { handDepthZ, videoToScreen } from './scene/mapping';
-import { FpsCounter, StatusPanel, type StatusInfo } from './ui/panel';
+import { World, type PinHit } from './scene/world';
+import { FpsCounter, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
 
 const video = document.getElementById('video') as HTMLVideoElement;
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const statusPanel = new StatusPanel(document.getElementById('status')!);
+const tooltip = new Tooltip(document.getElementById('tooltip')!);
 
 const sceneManager = new SceneManager(canvas);
+const world = new World(sceneManager);
+const interaction = new Interaction(sceneManager, world);
 const fpsCounter = new FpsCounter();
 const tracker = new HandTracker();
 const smoother = new HandSmoother();
 const rateController = new TrackingRateController();
-const status: StatusInfo = { fps: 0, camera: 'starting', tracker: 'loading', handCount: 0, trackingEveryNFrames: 1 };
+const status: StatusInfo = {
+  input: 'hand', fps: 0, camera: 'starting', tracker: 'loading', handCount: 0, trackingEveryNFrames: 1,
+};
 
-// Milestone 1 test cube; replaced by real components in milestone 3.
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshStandardMaterial({ color: 0x3fa7ff }),
+new Toolbar(document.getElementById('toolbar')!, (action) => world.spawn(action));
+
+// ---- Mouse mode (key M) ----
+const mouse: PointerState = { px: 0, py: 0, down: false };
+let mouseInside = false;
+
+function setInput(mode: 'hand' | 'mouse'): void {
+  status.input = mode;
+  document.body.classList.toggle('mouse-mode', mode === 'mouse');
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'm' || e.key === 'M') setInput(status.input === 'mouse' ? 'hand' : 'mouse');
+  if (status.input === 'mouse' && (e.key === 'r' || e.key === 'R')) {
+    interaction.rotateStep(e.shiftKey ? -config.interaction.mouseRotateStepRad : config.interaction.mouseRotateStepRad);
+  }
+});
+canvas.addEventListener('pointermove', (e) => {
+  mouse.px = e.clientX;
+  mouse.py = e.clientY;
+  mouseInside = true;
+});
+canvas.addEventListener('pointerleave', () => (mouseInside = false));
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.button === 0) mouse.down = true;
+});
+window.addEventListener('pointerup', (e) => {
+  if (e.button === 0) mouse.down = false;
+});
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    if (status.input !== 'mouse') return;
+    e.preventDefault();
+    interaction.rotateStep(Math.sign(e.deltaY) * config.interaction.mouseRotateStepRad);
+  },
+  { passive: false },
 );
-sceneManager.scene.add(cube);
 
-// One fingertip cursor per hand.
+// ---- Hand cursors ----
 const cursors = [0xffd23f, 0xff5fa2].map((color) => {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshBasicMaterial({ color }));
   m.visible = false;
@@ -33,13 +75,23 @@ const cursors = [0xffd23f, 0xff5fa2].map((color) => {
   return m;
 });
 
+function landmarkToScreen(hand: TrackedHand, index: number): { px: number; py: number } {
+  const p = hand.landmarks[index];
+  return videoToScreen(p.x, p.y, video.videoWidth, video.videoHeight, window.innerWidth, window.innerHeight);
+}
+
 /** World position of a landmark, using the palm size for depth. */
 function landmarkToWorld(hand: TrackedHand, index: number, target: THREE.Vector3): THREE.Vector3 {
-  const lm = hand.landmarks;
-  const p = lm[index];
-  const palm = Math.hypot(lm[LM.WRIST].x - lm[LM.MIDDLE_MCP].x, lm[LM.WRIST].y - lm[LM.MIDDLE_MCP].y);
-  const { px, py } = videoToScreen(p.x, p.y, video.videoWidth, video.videoHeight, window.innerWidth, window.innerHeight);
-  return sceneManager.screenToWorld(px, py, handDepthZ(palm), target);
+  const { px, py } = landmarkToScreen(hand, index);
+  return sceneManager.screenToWorld(px, py, handDepthZ(handSize(hand.landmarks)), target);
+}
+
+function pinLabel(hit: PinHit): string {
+  const c = hit.component;
+  if (c instanceof Board) return `${c.def.label} · ${hit.pin}`;
+  if (c.type === 'led') return hit.pin === 'anode' ? 'LED anode (+)' : 'LED cathode (−)';
+  if (c.type === 'resistor') return `Resistor 220Ω · leg ${hit.pin}`;
+  return `Breadboard · ${hit.pin}`;
 }
 
 startWebcam(video)
@@ -48,6 +100,7 @@ startWebcam(video)
     status.camera = 'error';
     status.cameraError = err instanceof Error ? err.message : String(err);
     console.error('Webcam failed:', err);
+    setInput('mouse');
   });
 
 tracker
@@ -82,8 +135,16 @@ function loop(now: number): void {
     if (hand) landmarkToWorld(hand, LM.INDEX_TIP, cursor.position);
   });
 
-  cube.rotation.x += 0.01;
-  cube.rotation.y += 0.015;
+  // Hand-driven pointer is added in milestone 4; mouse mode drives it now.
+  interaction.update(status.input === 'mouse' && mouseInside ? mouse : null);
+
+  if (interaction.hoverPin) {
+    const p = interaction.hoverPin.component.pinWorld(interaction.hoverPin.pin);
+    const s = sceneManager.worldToScreen(p);
+    tooltip.show(pinLabel(interaction.hoverPin), s.px, s.py);
+  } else {
+    tooltip.hide();
+  }
 
   sceneManager.render();
   statusPanel.update(status);

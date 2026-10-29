@@ -26,7 +26,7 @@ export interface BoardDef {
   pins: BoardPinDef[];
 }
 
-const PIN_PITCH = 0.1;
+const PIN_PITCH = 0.14;
 
 /** Lays out a straight header row of pins along X at the given z on top of the board. */
 function header(
@@ -65,9 +65,9 @@ export const BOARDS: Record<BoardKind, BoardDef> = {
           ['D9', 'gpio'], ['D8', 'gpio'], ['D7', 'gpio'], ['D6', 'gpio'],
           ['D5', 'gpio'], ['D4', 'gpio'], ['D3', 'gpio'], ['D2', 'gpio'],
         ],
-        -0.7,
+        -0.65,
         UNO_SIZE[1] / 2,
-        -0.6,
+        -0.84,
       ),
       // Power header along the front edge.
       ...header([['5V', 'power', 5]], 0.7, UNO_SIZE[1] / 2, -0.3),
