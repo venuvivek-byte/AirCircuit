@@ -112,7 +112,9 @@ export class HintBar {
 
 function hintFor(s: HintState): [string, boolean] {
   if (s.input === 'mouse') {
-    if (s.camera === 'error') return ['Camera unavailable: mouse mode. Drag parts, drag pin→pin to wire, R rotates, Delete removes, Enter runs.', true];
+    if (s.camera === 'error') {
+      return ['Camera unavailable (close other apps/tabs using it; retrying). Mouse mode: drag parts, drag pin→pin to wire, Enter runs.', true];
+    }
     if (s.action === 'wire') return ['Release on another pin to connect the wire.', false];
     if (s.action === 'grab') return ['Drop near the breadboard to plug in · wheel / R rotates · drop on the trash to delete.', false];
     if (s.componentCount === 0) return ['Mouse mode: click a part on the left to spawn it.', false];

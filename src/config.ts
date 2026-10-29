@@ -5,6 +5,8 @@ export const config = {
     width: 1280,
     height: 720,
     facingMode: 'user' as const,
+    // Retry interval when the webcam is busy (used by another app) or missing.
+    retryMs: 2000,
   },
   scene: {
     fov: 50,

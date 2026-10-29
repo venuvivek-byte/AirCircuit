@@ -59,7 +59,10 @@ function setInput(mode: 'hand' | 'mouse'): void {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'm' || e.key === 'M') setInput(status.input === 'mouse' ? 'hand' : 'mouse');
+  if (e.key === 'm' || e.key === 'M') {
+    autoMouse = false;
+    setInput(status.input === 'mouse' ? 'hand' : 'mouse');
+  }
   if (status.input === 'mouse' && (e.key === 'r' || e.key === 'R')) {
     interaction.rotateStep(e.shiftKey ? -config.interaction.mouseRotateStepRad : config.interaction.mouseRotateStepRad);
   }
@@ -203,14 +206,41 @@ function pinLabel(hit: PinHit): string {
   return `Breadboard · ${hit.pin}`;
 }
 
-startWebcam(video)
-  .then(() => (status.camera = 'ok'))
-  .catch((err: unknown) => {
-    status.camera = 'error';
-    status.cameraError = err instanceof Error ? err.message : String(err);
-    console.error('Webcam failed:', err);
-    setInput('mouse');
-  });
+/** True when we switched to mouse mode because of a camera failure (not by the user's M key). */
+let autoMouse = false;
+
+function cameraErrorText(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : '';
+  if (name === 'NotReadableError' || name === 'AbortError') return 'in use by another app or tab (retrying…)';
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'no webcam found (retrying…)';
+  if (name === 'NotAllowedError') return 'permission denied';
+  return err instanceof Error ? err.message : String(err);
+}
+
+function startCamera(): void {
+  startWebcam(video)
+    .then(() => {
+      status.camera = 'ok';
+      status.cameraError = undefined;
+      if (autoMouse) {
+        autoMouse = false;
+        setInput('hand');
+      }
+    })
+    .catch((err: unknown) => {
+      status.camera = 'error';
+      status.cameraError = cameraErrorText(err);
+      console.error('Webcam failed:', err);
+      if (status.input !== 'mouse') {
+        autoMouse = true;
+        setInput('mouse');
+      }
+      // A busy or missing camera can come back; a denied permission needs the user, so don't re-prompt.
+      const name = err instanceof DOMException ? err.name : '';
+      if (name !== 'NotAllowedError' && name !== 'SecurityError') setTimeout(startCamera, config.camera.retryMs);
+    });
+}
+startCamera();
 
 tracker
   .init()
