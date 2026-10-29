@@ -29,6 +29,18 @@ export class Breadboard extends SceneComponent {
     body.position.y = t / 2;
     this.root.add(body);
 
+    // Holes cover the whole top, so the breadboard is grabbed by this front tab instead.
+    const handle = new THREE.Mesh(
+      new THREE.BoxGeometry(width * 0.5, t * 0.8, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0x5a6b80, roughness: 0.6 }),
+    );
+    handle.position.set(0, t * 0.4, depth / 2 + 0.11);
+    handle.userData.handle = true;
+    this.root.add(handle);
+    const grip = makeLabel('✋ grab here', '#ffffff', 0.09);
+    grip.position.set(0, t + 0.05, depth / 2 + 0.11);
+    this.root.add(grip);
+
     const rowZ = (row: string) => (ROW_INDEX[row] - ROW_CENTER) * p;
     const colX = (col: number) => (col - (COLUMNS + 1) / 2) * p;
 

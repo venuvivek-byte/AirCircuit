@@ -34,6 +34,17 @@ export const config = {
     spawnOffset: 0.25,
     labelScale: 0.11,
   },
+  wires: {
+    radius: 0.018,
+    baseLift: 0.15,
+    liftPerUnit: 0.2,
+  },
+  snapping: {
+    // Max distance (breadboard-local units) from a leg to the nearest hole for a snap.
+    snapRadius: 0.25,
+    // After aligning, every leg must be this close to a hole.
+    legTolerance: 0.03,
+  },
   interaction: {
     // Screen-space radius for hovering / picking a pin.
     pinPickRadiusPx: 16,

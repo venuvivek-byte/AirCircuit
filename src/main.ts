@@ -20,7 +20,12 @@ const tooltip = new Tooltip(document.getElementById('tooltip')!);
 
 const sceneManager = new SceneManager(canvas);
 const world = new World(sceneManager);
-const interaction = new Interaction(sceneManager, world);
+const trashEl = document.getElementById('trash')!;
+function isOverTrash(px: number, py: number): boolean {
+  const r = trashEl.getBoundingClientRect();
+  return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
+}
+const interaction = new Interaction(sceneManager, world, isOverTrash);
 const fpsCounter = new FpsCounter();
 const tracker = new HandTracker();
 const smoother = new HandSmoother();
@@ -28,6 +33,9 @@ const rateController = new TrackingRateController();
 const status: StatusInfo = {
   input: 'hand', fps: 0, camera: 'starting', tracker: 'loading', handCount: 0, trackingEveryNFrames: 1,
 };
+
+// Dev-only handle for automated browser checks.
+if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction } });
 
 new Toolbar(document.getElementById('toolbar')!, (action) => world.spawn(action));
 
@@ -45,13 +53,15 @@ window.addEventListener('keydown', (e) => {
   if (status.input === 'mouse' && (e.key === 'r' || e.key === 'R')) {
     interaction.rotateStep(e.shiftKey ? -config.interaction.mouseRotateStepRad : config.interaction.mouseRotateStepRad);
   }
+  if (status.input === 'mouse' && (e.key === 'Delete' || e.key === 'Backspace')) interaction.deleteHovered();
 });
-canvas.addEventListener('pointermove', (e) => {
+// Track on window so dragging across the toolbar doesn't cancel an action.
+window.addEventListener('pointermove', (e) => {
   mouse.px = e.clientX;
   mouse.py = e.clientY;
   mouseInside = true;
 });
-canvas.addEventListener('pointerleave', () => (mouseInside = false));
+document.documentElement.addEventListener('pointerleave', () => (mouseInside = false));
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button === 0) mouse.down = true;
 });
@@ -95,6 +105,7 @@ const handControl = new HandControl((x, y) =>
 /** True while a pinch that started on a toolbar button is held, so it doesn't also grab. */
 let pinchOnUi = false;
 let handHoverButton: HTMLElement | null = null;
+let lastHandPointer: PointerState | null = null;
 
 function uiButtonAt(px: number, py: number): HTMLElement | null {
   const el = document.elementFromPoint(px, py);
@@ -103,6 +114,7 @@ function uiButtonAt(px: number, py: number): HTMLElement | null {
 
 function updateHandInput(hands: TrackedHand[]): void {
   const frame = handControl.update(hands, !!interaction.grabbed);
+  lastHandPointer = frame.pointer;
   const button = frame.pointer ? uiButtonAt(frame.pointer.px, frame.pointer.py) : null;
 
   if (button !== handHoverButton) {
@@ -178,6 +190,9 @@ function loop(now: number): void {
   } else {
     updateHandInput(hands);
   }
+
+  const pointer = status.input === 'mouse' ? (mouseInside ? mouse : null) : lastHandPointer;
+  trashEl.classList.toggle('active', interaction.busy && !!pointer && isOverTrash(pointer.px, pointer.py));
 
   if (interaction.hoverPin) {
     const p = interaction.hoverPin.component.pinWorld(interaction.hoverPin.pin);
