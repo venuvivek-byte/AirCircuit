@@ -33,6 +33,15 @@ export class SceneManager {
     this.camera.updateProjectionMatrix();
   }
 
+  /** World point on the plane z = worldZ under the given screen pixel. */
+  screenToWorld(px: number, py: number, worldZ: number, target = new THREE.Vector3()): THREE.Vector3 {
+    const ndc = new THREE.Vector3((px / window.innerWidth) * 2 - 1, -(py / window.innerHeight) * 2 + 1, 0.5);
+    ndc.unproject(this.camera);
+    const dir = ndc.sub(this.camera.position).normalize();
+    const t = (worldZ - this.camera.position.z) / dir.z;
+    return target.copy(this.camera.position).addScaledVector(dir, t);
+  }
+
   render(): void {
     this.renderer.render(this.scene, this.camera);
   }

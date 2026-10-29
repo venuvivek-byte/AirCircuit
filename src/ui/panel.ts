@@ -21,10 +21,16 @@ export interface StatusInfo {
   fps: number;
   camera: 'starting' | 'ok' | 'error';
   cameraError?: string;
+  tracker: 'loading' | 'ok' | 'error';
+  trackerDelegate?: string;
+  handCount: number;
+  trackingEveryNFrames: number;
 }
 
 /** Right-hand status panel (tracking state, FPS). Validator messages are added in milestone 7. */
 export class StatusPanel {
+  private lastHtml = '';
+
   constructor(private el: HTMLElement) {}
 
   update(info: StatusInfo): void {
@@ -32,6 +38,17 @@ export class StatusPanel {
       info.camera === 'error'
         ? `<span class="err">Camera: ${info.cameraError ?? 'unavailable'}</span>`
         : `Camera: ${info.camera}`;
-    this.el.innerHTML = `${cam}<br>FPS: ${info.fps.toFixed(0)}`;
+    const tracker =
+      info.tracker === 'error'
+        ? `<span class="err">Hand tracking: failed</span>`
+        : `Hand tracking: ${info.tracker}${info.trackerDelegate ? ` (${info.trackerDelegate})` : ''}`;
+    const mode =
+      info.trackingEveryNFrames === 1 ? 'every frame' : `every ${info.trackingEveryNFrames} frames (interpolated)`;
+    const html = [cam, tracker, `Hands: ${info.handCount}`, `Tracking: ${mode}`, `FPS: ${info.fps.toFixed(0)}`].join('<br>');
+    // Avoid touching the DOM every frame when nothing changed.
+    if (html !== this.lastHtml) {
+      this.el.innerHTML = html;
+      this.lastHtml = html;
+    }
   }
 }
