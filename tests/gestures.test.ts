@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DepthTracker,
   FistDetector,
   PinchDetector,
   fingerCurl,
@@ -7,6 +8,8 @@ import {
   PressDetector,
   RotationTracker,
   RuleBasedClassifier,
+  ScissorDetector,
+  isScissorPose,
   TwoHandTwistTracker,
   angleDelta,
   handSize,
@@ -18,6 +21,7 @@ import {
   wristRoll,
 } from '../src/tracking/gestures';
 import { LM, type HandLandmarks, type Landmark } from '../src/tracking/types';
+import { HandControl } from '../src/scene/handControl';
 
 // ---------------------------------------------------------------------------
 // Synthetic hand builder
@@ -185,6 +189,23 @@ describe('PinchDetector', () => {
     expect(d.update(makeHand({ gap: 0.8 }), makeHand({ gap: 0.2 })).started).toBe(true);
   });
 
+  it('reports opening while still pinching in the hysteresis band', () => {
+    const d = new PinchDetector(0.35, 0.5, 3, 1);
+    d.update(makeHand({ gap: 0.2 }));
+    expect(d.opening).toBe(false);
+    expect(d.update(makeHand({ gap: 0.45 })).pinching).toBe(true);
+    expect(d.opening).toBe(true);
+    expect(d.ratio).toBeCloseTo(0.45, 6);
+  });
+
+  it('accepts a pinch with the index bent toward the thumb (default thresholds)', () => {
+    const d = new PinchDetector();
+    const bent = makeHand({ curls: [0.6, 1, 1, 1], gap: 0.1 });
+    expect(fingerCurl(bent, 0)).toBeLessThan(1);
+    d.update(bent);
+    expect(d.update(bent).started).toBe(true);
+  });
+
   it('losing the hand ends an active pinch', () => {
     const d = new PinchDetector();
     d.update(makeHand({ gap: 0.1 }));
@@ -319,5 +340,93 @@ describe('fist', () => {
   it('closing into a fist never starts a pinch', () => {
     const d = new PinchDetector(0.35, 0.5, 1, 1);
     for (let i = 0; i < 5; i++) expect(d.update(makeHand({ curl: 1, gap: 0.1 })).pinching).toBe(false);
+  });
+});
+
+describe('HandControl', () => {
+  const toScreen = (x: number, y: number) => ({ px: x * 1000, py: y * 1000 });
+  const hand = (o: HandOpts) => ({ landmarks: makeHand(o), handedness: 'Right' as const });
+
+  it('freezes the pointer while a pinch opens, so the release lands where the pinch was', () => {
+    const hc = new HandControl(toScreen);
+    let f = hc.update([hand({ gap: 0.1 })], false);
+    f = hc.update([hand({ gap: 0.1 })], false);
+    expect(f.grip).toBe('pinch');
+    const at = { px: f.pointer!.px, py: f.pointer!.py };
+
+    // Fingers separate and the hand drifts: pointer stays put through the release frame.
+    let ended = false;
+    for (let i = 1; i <= 8 && !ended; i++) {
+      f = hc.update([hand({ gap: i < 3 ? 0.45 : 0.8, tx: 0.5 + i * 0.01 })], false);
+      expect(f.pointer!.px).toBeCloseTo(at.px, 6);
+      expect(f.pointer!.py).toBeCloseTo(at.py, 6);
+      ended = !f.pointer!.down;
+    }
+    expect(ended).toBe(true);
+
+    // Afterwards the pointer follows the hand again.
+    f = hc.update([hand({ gap: 0.8, tx: 0.7 })], false);
+    expect(f.pointer!.px).toBeGreaterThan(at.px + 100);
+  });
+
+  it('a loose pinch held in the hysteresis band stops freezing (it is a drag)', () => {
+    const hc = new HandControl(toScreen);
+    hc.update([hand({ gap: 0.1 })], false);
+    const frozen = hc.update([hand({ gap: 0.1 })], false).pointer!.px;
+    let f = hc.update([hand({ gap: 0.45, tx: 0.6 })], false);
+    expect(f.pointer!.px).toBeCloseTo(frozen, 6);
+    for (let i = 0; i < 20; i++) f = hc.update([hand({ gap: 0.45, tx: 0.6 })], false);
+    expect(f.grip).toBe('pinch');
+    expect(f.pointer!.px).toBeGreaterThan(frozen + 50);
+  });
+});
+
+describe('DepthTracker', () => {
+  it('reports > 1 when the hand comes closer, < 1 when it moves back', () => {
+    const d = new DepthTracker(0.1);
+    d.begin(makeHand({ scale: 0.2, curl: 1 }));
+    expect(d.update(makeHand({ scale: 0.3, curl: 1 }))).toBeGreaterThan(1.3);
+    expect(d.update(makeHand({ scale: 0.13, curl: 1 }))).toBeLessThan(0.75);
+  });
+
+  it('ignores small size changes and tilting the hand', () => {
+    const d = new DepthTracker(0.1);
+    d.begin(makeHand({ scale: 0.2, curl: 1 }));
+    expect(d.update(makeHand({ scale: 0.21, curl: 1 }))).toBe(1);
+    expect(d.update(makeHand({ scale: 0.2, curl: 1, tilt: 0.6 }))).toBe(1);
+    expect(d.update(makeHand({ scale: 0.2, curl: 1, rotation: 0.8 }))).toBe(1);
+  });
+});
+
+describe('ScissorDetector', () => {
+  /** V sign (index + middle straight, ring + pinky curled) with the two fingertips `gap` hand-sizes apart. */
+  function vSign(gap: number): HandLandmarks {
+    const lm = makeHand({ curls: [0, 0, 1, 1] });
+    const m = lm[LM.MIDDLE_TIP];
+    lm[LM.INDEX_TIP] = { x: m.x - gap * 0.2, y: m.y, z: m.z };
+    return lm;
+  }
+
+  it('recognises the V-sign pose but not an open hand, a fist or a point', () => {
+    expect(isScissorPose(vSign(0.5))).toBe(true);
+    expect(isScissorPose(makeHand({ curl: 0 }))).toBe(false);
+    expect(isScissorPose(makeHand({ curl: 1 }))).toBe(false);
+    expect(isScissorPose(makeHand({ curls: [0, 1, 1, 1] }))).toBe(false);
+  });
+
+  it('snips once on open -> close, never from fingers merely held together', () => {
+    const d = new ScissorDetector(0.4, 0.25, 1);
+    for (let i = 0; i < 5; i++) expect(d.update(vSign(0.15)).snip).toBe(false);
+    expect(d.update(vSign(0.6))).toEqual({ active: true, open: true, snip: false });
+    expect(d.update(vSign(0.3)).snip).toBe(false);
+    expect(d.update(vSign(0.15))).toEqual({ active: true, open: false, snip: true });
+    expect(d.update(vSign(0.15)).snip).toBe(false);
+  });
+
+  it('dropping the pose disarms a half-done snip', () => {
+    const d = new ScissorDetector(0.4, 0.25, 1);
+    d.update(vSign(0.6));
+    expect(d.update(makeHand({ curl: 0 })).active).toBe(false);
+    expect(d.update(vSign(0.15)).snip).toBe(false);
   });
 });

@@ -6,6 +6,7 @@
 
 import { BOARDS } from '../components/boards';
 import { holeGroup } from '../components/breadboardLayout';
+import { SENSORS } from '../components/sensors';
 import { LED_PINS, RESISTOR_PINS, pinKey, type Circuit, type PinRef, type SimComponent } from './types';
 
 export interface Netlist {
@@ -90,6 +91,8 @@ export function buildNetlist(circuit: Circuit): Netlist {
       for (const pin of LED_PINS) register({ componentId: c.id, pin });
     } else if (c.type === 'resistor') {
       for (const pin of RESISTOR_PINS) register({ componentId: c.id, pin });
+    } else if (c.type === 'sensor' && c.sensorKind) {
+      for (const p of SENSORS[c.sensorKind].pins) register({ componentId: c.id, pin: p.name });
     }
   }
 

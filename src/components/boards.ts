@@ -52,7 +52,7 @@ export const BOARDS: Record<BoardKind, BoardDef> = {
     label: 'Arduino Uno',
     logicLevel: 5,
     blinkPin: 'D13',
-    groundPins: ['GND'],
+    groundPins: ['GND', 'GND2'],
     powerPins: ['5V'],
     size: UNO_SIZE,
     color: 0x00878f, // Arduino teal
@@ -69,8 +69,14 @@ export const BOARDS: Record<BoardKind, BoardDef> = {
         UNO_SIZE[1] / 2,
         -0.84,
       ),
-      // Power header along the front edge.
-      ...header([['5V', 'power', 5]], 0.7, UNO_SIZE[1] / 2, -0.3),
+      // Power header along the front edge, then the analog inputs.
+      ...header([['5V', 'power', 5], ['GND2', 'ground']], 0.7, UNO_SIZE[1] / 2, -0.84),
+      ...header(
+        [['A0', 'gpio'], ['A1', 'gpio'], ['A2', 'gpio'], ['A3', 'gpio'], ['A4', 'gpio'], ['A5', 'gpio']],
+        0.7,
+        UNO_SIZE[1] / 2,
+        0.0,
+      ),
     ],
   },
   esp32: {
@@ -87,6 +93,7 @@ export const BOARDS: Record<BoardKind, BoardDef> = {
       ...(
         [
           ['3V3', 'power', 3.3], ['GND', 'ground'], ['GPIO2', 'gpio'], ['GPIO4', 'gpio'], ['GPIO5', 'gpio'],
+          ['GPIO34', 'gpio'],
         ] as Array<[string, PinRole, number?]>
       ).map(([name, role, voltage], i): BoardPinDef => ({
         name, role, ...(voltage !== undefined ? { voltage } : {}),
@@ -96,6 +103,7 @@ export const BOARDS: Record<BoardKind, BoardDef> = {
       ...(
         [
           ['VIN', 'power', 5], ['GPIO18', 'gpio'], ['GPIO19', 'gpio'], ['GPIO21', 'gpio'], ['GPIO23', 'gpio'],
+          ['GPIO35', 'gpio'],
         ] as Array<[string, PinRole, number?]>
       ).map(([name, role, voltage], i): BoardPinDef => ({
         name, role, ...(voltage !== undefined ? { voltage } : {}),

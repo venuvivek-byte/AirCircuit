@@ -114,6 +114,7 @@ export class PinchDetector {
   private pinching = false;
   private openFrames = 0;
   private closedFrames = 0;
+  private lastRatio = Infinity;
 
   constructor(
     private readonly close: number = config.gestures.pinchClose,
@@ -131,8 +132,10 @@ export class PinchDetector {
     const was = this.pinching;
     if (lm === null) {
       this.pinching = false;
+      this.lastRatio = Infinity;
     } else {
       const r = handPinchRatio(lm, world);
+      this.lastRatio = r;
       if (!was) {
         const closed = r < this.close && fingerCurl(world ?? lm, 0) > this.minIndexCurl;
         this.closedFrames = closed ? this.closedFrames + 1 : 0;
@@ -150,10 +153,21 @@ export class PinchDetector {
     return this.pinching;
   }
 
+  /** Pinch ratio of the last frame (Infinity without a hand). */
+  get ratio(): number {
+    return this.lastRatio;
+  }
+
+  /** Still pinching, but the fingers have started to separate (ratio above the close threshold). */
+  get opening(): boolean {
+    return this.pinching && this.lastRatio > this.close;
+  }
+
   reset(): void {
     this.pinching = false;
     this.openFrames = 0;
     this.closedFrames = 0;
+    this.lastRatio = Infinity;
   }
 }
 
@@ -219,6 +233,41 @@ export class TwoHandTwistTracker {
   update(lmA: HandLandmarks, lmB: HandLandmarks): number {
     if (!this.active) this.begin(lmA, lmB);
     return deadzone(angleDelta(this.ref, twoHandTwist(lmA, lmB)), this.dz);
+  }
+
+  end(): void {
+    this.active = false;
+  }
+
+  get isActive(): boolean {
+    return this.active;
+  }
+}
+
+/**
+ * Hand distance from the camera relative to begin(), from apparent palm size: > 1 = hand moved
+ * closer, < 1 = moved back. Uses whichever of palm length (wrist -> middle MCP) and width (index ->
+ * pinky MCP) shrank least, so tilting or turning the hand (which foreshortens one) isn't read as
+ * moving it. Soft deadzone in log space so ordinary carrying doesn't register.
+ */
+export class DepthTracker {
+  private refLength = 0;
+  private refWidth = 0;
+  private active = false;
+
+  constructor(private readonly dz: number = config.gestures.depthDeadzone) {}
+
+  begin(lm: HandLandmarks): void {
+    this.refLength = handSize(lm);
+    this.refWidth = dist2(lm[LM.INDEX_MCP], lm[LM.PINKY_MCP]);
+    this.active = true;
+  }
+
+  update(lm: HandLandmarks): number {
+    if (!this.active) this.begin(lm);
+    if (this.refLength <= 1e-9 || this.refWidth <= 1e-9) return 1;
+    const r = Math.max(handSize(lm) / this.refLength, dist2(lm[LM.INDEX_MCP], lm[LM.PINKY_MCP]) / this.refWidth);
+    return Math.exp(deadzone(Math.log(r), this.dz));
   }
 
   end(): void {
@@ -327,6 +376,72 @@ export class FistDetector {
 
   get isFist(): boolean {
     return this.active;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scissors
+// ---------------------------------------------------------------------------
+
+/** Index tip <-> middle tip distance over palm size; 3D from world landmarks when given. */
+export function fingerGap(lm: HandLandmarks, world?: HandLandmarks): number {
+  const h = world ?? lm;
+  const d = world ? dist3 : dist2;
+  const size = d(h[LM.WRIST], h[LM.MIDDLE_MCP]);
+  return size <= 1e-9 ? Infinity : d(h[LM.INDEX_TIP], h[LM.MIDDLE_TIP]) / size;
+}
+
+/** V sign: index and middle extended, ring and pinky curled. */
+export function isScissorPose(
+  lm: HandLandmarks,
+  extended: number = config.gestures.scissorExtended,
+  curled: number = config.gestures.scissorCurled,
+): boolean {
+  return (
+    fingerCurl(lm, 0) > extended && fingerCurl(lm, 1) > extended && fingerCurl(lm, 2) < curled && fingerCurl(lm, 3) < curled
+  );
+}
+
+/** Cut point: midpoint of the index and middle fingertips. */
+export function scissorPoint(lm: HandLandmarks): Landmark {
+  const a = lm[LM.INDEX_TIP];
+  const b = lm[LM.MIDDLE_TIP];
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
+}
+
+export type ScissorEvent = { active: boolean; open: boolean; snip: boolean };
+
+/**
+ * Scissor gesture: `active` while the V-sign pose is held; `snip` fires once when the fingers,
+ * having been spread open, close together. Just holding them together never snips, so a resting
+ * two-finger pose can't cut by accident.
+ */
+export class ScissorDetector {
+  private poseFrames = 0;
+  private opened = false;
+
+  constructor(
+    private readonly open: number = config.gestures.scissorOpen,
+    private readonly close: number = config.gestures.scissorClose,
+    private readonly startFrames: number = config.gestures.scissorStartFrames,
+  ) {}
+
+  /** Feed one frame (null = hand lost or busy with another grip). Pass world landmarks when available. */
+  update(lm: HandLandmarks | null, world?: HandLandmarks): ScissorEvent {
+    const pose = lm !== null && isScissorPose(world ?? lm);
+    this.poseFrames = pose ? this.poseFrames + 1 : 0;
+    if (!lm || this.poseFrames < this.startFrames) {
+      this.opened = false;
+      return { active: false, open: false, snip: false };
+    }
+    const gap = fingerGap(lm, world);
+    let snip = false;
+    if (gap > this.open) this.opened = true;
+    else if (this.opened && gap < this.close) {
+      this.opened = false;
+      snip = true;
+    }
+    return { active: true, open: this.opened, snip };
   }
 }
 

@@ -4,7 +4,12 @@ import { LM, type TrackedHand } from '../tracking/types';
 import type { Grip } from '../scene/interaction';
 
 const BONES = HandLandmarker.HAND_CONNECTIONS;
-const COLORS: Record<'none' | Grip, string> = { none: '#ffd23f', pinch: '#3dff7a', fist: '#ff8a3d' };
+const COLORS: Record<'none' | 'scissors' | Grip, string> = {
+  none: '#ffd23f',
+  pinch: '#3dff7a',
+  fist: '#ff8a3d',
+  scissors: '#ff4d6d',
+};
 
 /** 2D overlay that draws each tracked hand as a skeleton (bones + joints) over the video. */
 export class SkeletonOverlay {
@@ -18,7 +23,8 @@ export class SkeletonOverlay {
     this.ctx = canvas.getContext('2d')!;
   }
 
-  draw(hands: TrackedHand[], grips: Array<Grip | null>): void {
+  /** `scissors`: the primary hand's cut point while in the scissor pose. */
+  draw(hands: TrackedHand[], grips: Array<Grip | null>, scissors: { px: number; py: number; open: boolean } | null = null): void {
     const dpr = window.devicePixelRatio || 1;
     const w = Math.round(window.innerWidth * dpr);
     const h = Math.round(window.innerHeight * dpr);
@@ -32,7 +38,8 @@ export class SkeletonOverlay {
 
     hands.forEach((hand, i) => {
       const grip = grips[i] ?? null;
-      const color = COLORS[grip ?? 'none'];
+      const cutting = i === 0 && scissors !== null;
+      const color = COLORS[cutting ? 'scissors' : (grip ?? 'none')];
       const pts = hand.landmarks.map((p) => this.toScreen(p.x, p.y));
 
       ctx.lineCap = 'round';
@@ -67,6 +74,19 @@ export class SkeletonOverlay {
       ctx.beginPath();
       ctx.arc((t.px + f.px) / 2, (t.py + f.py) / 2, grip === 'pinch' ? 8 : 5, 0, Math.PI * 2);
       ctx.fill();
+
+      // Scissors cut point: a red cross-hair between the index and middle fingertips.
+      if (cutting) {
+        const r = scissors.open ? 12 : 8;
+        ctx.strokeStyle = COLORS.scissors;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(scissors.px - r, scissors.py);
+        ctx.lineTo(scissors.px + r, scissors.py);
+        ctx.moveTo(scissors.px, scissors.py - r);
+        ctx.lineTo(scissors.px, scissors.py + r);
+        ctx.stroke();
+      }
     });
   }
 

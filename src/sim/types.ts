@@ -2,14 +2,17 @@
 // The scene layer converts its components, snapped legs and wires into this shape.
 
 import type { BoardKind } from '../components/boards';
+import type { SensorKind } from '../components/sensors';
 
-export type ComponentType = 'board' | 'breadboard' | 'led' | 'resistor';
+export type ComponentType = 'board' | 'breadboard' | 'led' | 'resistor' | 'sensor';
 
 export interface SimComponent {
   id: string;
   type: ComponentType;
   /** Required when type === 'board'. */
   boardKind?: BoardKind;
+  /** Required when type === 'sensor'. */
+  sensorKind?: SensorKind;
 }
 
 /** Pin names per component type:
@@ -17,6 +20,7 @@ export interface SimComponent {
  *  breadboard -> hole names from breadboardLayout ('a1', '+3', ...)
  *  led        -> 'anode' | 'cathode'
  *  resistor   -> 'a' | 'b'
+ *  sensor     -> names from SENSORS[sensorKind].pins
  */
 export interface PinRef {
   componentId: string;

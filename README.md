@@ -43,12 +43,16 @@ If something is wrong, the panel says why:
 
 | Gesture | How | Does |
 |---|---|---|
-| **Spawn** | Hold your index fingertip on a toolbar button for **5 s** (the button fills up and counts down) | Spawn that part |
+| **Spawn** | Hold your index fingertip on a toolbar button for **2 s** (the button fills up and counts down) | Spawn that part |
 | **Grab** | Put your palm (orange ring) over a part and make a **fist** | Grab the part |
 | **Move** | Keep the fist and move your hand | Carry the grabbed part |
 | **Rotate** | Keep the fist and roll your wrist (tilt the palm to pitch). Or grip with **both** hands and twist | Rotate the part |
 | **Release** | Open your hand | Drop the part. Parts dropped near the breadboard snap into its holes |
-| **Wire** | **Pinch** (thumb + index) on a pin, drag to another pin, release | Create a jumper wire |
+| **Wire** | **Pinch** (thumb + index) on a pin, drag until the yellow ring sits on another pin, release | Create a jumper wire |
+| **Loose end** | Release a wire away from any pin; pinch its round tip later to carry on | The end stays in the air |
+| **Unplug** | Pinch a wire and hold still for **2 s** | Its nearest end comes off into your hand |
+| **Cut** | Make a ✌ V sign, aim the red cross-hair at a wire (it turns red), spread then close the two fingers | Delete that wire |
+| **Zoom** | While holding a part with a fist, push toward / pull back from the camera. Or press **Z** / the 🔍 button | Zoom in / out |
 | **Press** | Point your index fingertip at a 3D button and push it toward the screen, or pinch on it | Run / Stop / Reset |
 | **Delete** | Drop a part (fist) or a wire (pinch it) on the red **trash** box (bottom-left) | Remove it |
 
@@ -57,6 +61,39 @@ Other tips:
 - Your hand is drawn as a skeleton: joints turn **green** while you pinch and **orange** while you make a fist. The orange ring is the palm point a fist grabs with; the white dot between thumb and index is the pinch point used for wiring.
 - The bottom bar always shows a hint for what you can do next.
 - Tracking works best with your hand about 50 cm from the camera, in even light, against a plain background.
+
+## Programming the boards
+
+Press **C** (or the **</> Code** toolbar button) to open the code panel.
+
+1. Pick the board (each Arduino Uno / ESP32 in the scene has its own sketch).
+2. Write Arduino code, or load an example: Blink, Fade (PWM), IR obstacle, Ultrasonic distance, Sound / clap, Gas alarm. Each example starts with its wiring as a comment.
+3. Press **⬆ Upload** (or Ctrl+Enter). The sketch is compiled; errors show with their line number (click one to jump there). Then the board is "flashed" and reboots running it.
+4. `Serial.print` output appears in the **Serial Monitor**.
+
+Every board runs Blink until you upload something. Run powers the boards (as if on USB) and Stop powers them off.
+
+Supported: `setup` / `loop`, `int long float double bool char byte String` and `unsigned` variants, arrays (1D / 2D), functions, `if for while do switch`, `#define` constants, casts, `static` locals; `pinMode digitalWrite digitalRead analogRead analogWrite delay delayMicroseconds millis micros pulseIn map constrain min max abs pow sqrt random` and the rest of the Arduino maths functions; `Serial.begin print println printf`; ESP32 `ledcSetup / ledcAttachPin / ledcAttach / ledcWrite` and `analogReadResolution`; the **NewPing** library. Integer division truncates like C.
+
+Not supported (the compiler says so): pointers, references, classes / structs, char arrays (use `String`), function-like macros, and other libraries (Wi-Fi / Bluetooth are not simulated). Runtime mistakes such as an array index out of range or a division by zero stop the board with a message in the Serial Monitor.
+
+| Board | Logic | `analogRead` | PWM | `LED_BUILTIN` |
+|---|---|---|---|---|
+| Arduino Uno | 5 V | A0-A5, 0-1023 | 3 5 6 9 10 11 | 13 |
+| ESP32 DevKit | 3.3 V | GPIO 34 / 35 (and others), 0-4095 | any output pin | 2 |
+
+## Sensors
+
+Each module plugs into the breadboard or wires straight to a board. It needs **VCC** to 5V / 3V3 and **GND** to GND (its red LED shows power; the green LED shows detection). The **Sensors** panel shows live readings.
+
+| Sensor | Pins | Senses | Read with |
+|---|---|---|---|
+| IR obstacle (FC-51) | VCC GND OUT | Your hand close in front of it (OUT goes LOW) | `digitalRead` |
+| Ultrasonic (HC-SR04) | VCC TRIG ECHO GND | Distance to your hand in front of it | `pulseIn(echo, HIGH)` (cm = µs / 58) or NewPing |
+| Sound (KY-038) | AO GND VCC DO | Your microphone (🎤 button), the slider, or hold **V** | `analogRead(AO)`, `digitalRead(DO)` |
+| Gas (MQ-2) | VCC GND DO AO | The slider, or hold **G** to leak gas | `analogRead(AO)`, `digitalRead(DO)` (LOW = gas) |
+
+Sensors face you: bring your hand (or the mouse in mouse mode) toward the front of the module.
 
 ## Mouse mode (no camera needed)
 
@@ -69,6 +106,7 @@ Press **M** to switch between hands and mouse. The app also switches to mouse mo
 | Wheel / **R** (Shift+R reverses) | Rotate the hovered or held part |
 | **Delete** / Backspace | Delete the hovered wire or part |
 | Click a 3D button, or **Enter** / **Space** / **N** | Run / Stop / Reset |
+| **C** / **Z** | Code panel / zoom |
 
 Hover any pin to see its name.
 
@@ -87,12 +125,17 @@ src/
   tracking/smoothing.ts    EMA smoothing, interpolation, low-FPS fallback (pure)
   tracking/gestures.ts     pinch / rotate / twist / press + GestureClassifier (pure)
   scene/                   renderer, workspace, picking, interaction, hand control
-  components/              generic board (driven by boards.ts data), breadboard, LED, resistor, wire
+  components/              generic board (driven by boards.ts data), breadboard, LED, resistor, wire, sensor modules
   components/boards.ts     Arduino Uno + ESP32 pin maps, logic levels, blink pins
+  components/sensors.ts    sensor module pins and behaviour (pure data)
   sim/netlist.ts           union-find netlist (pure)
-  sim/simulator.ts         preset blink + LED state (pure)
+  sim/arduino/compiler.ts  Arduino-C subset -> JS generator compiler (pure)
+  sim/arduino/runtime.ts   runs a sketch on a virtual board: Arduino API, virtual time, Serial (pure)
+  sim/electrical.ts        pin / net voltages, LED brightness, sensor outputs (pure)
+  sim/machine.ts           runs every board's program against the circuit (pure)
   sim/validator.ts         rule-based circuit checker (pure)
-  ui/                      toolbar, status / messages panel, hints, 3D controls
+  scene/sensing.ts         hand / mouse / microphone -> what each sensor senses
+  ui/                      toolbar, status / messages / sensors panels, code panel, hints, 3D controls
 tests/                     Vitest suites for the pure modules
 ```
 
@@ -105,9 +148,10 @@ webcam → MediaPipe HandLandmarker → smoothing → gestures (pinch / rotate /
                                                      ↓
                      Three.js scene (raycast picking, transforms, snapping, wires)
                                                      ↓
-                          netlist → simulator (LED state) + validator (messages)
+                netlist → machine (compiled sketches + electrical model) → LEDs, sensors, Serial
+                        └→ validator (messages)
 ```
 
 ## Out of scope (MVP)
 
-The MVP does not include Raspberry Pi, WebXR, sketch upload, Wi-Fi/Bluetooth, analog simulation, physical board recognition, saving, multiplayer or mobile. Phase 2 plans a trained gesture MLP behind `GestureClassifier`, Raspberry Pi as a third board, and an "ask the assistant" explainer.
+Not included: Raspberry Pi, WebXR, uploading to real hardware, Wi-Fi/Bluetooth, full analog (current / voltage-divider) simulation, battery / USB power modelling, physical board recognition, saving, multiplayer or mobile. Phase 2 plans a trained gesture MLP behind `GestureClassifier`, Raspberry Pi as a third board, and an "ask the assistant" explainer.

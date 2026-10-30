@@ -70,6 +70,6 @@ describe('buildNetlist', () => {
   it('includes all board pins as known pins', () => {
     const n = buildNetlist(circuit([esp], []));
     expect(n.pinsInNet(n.netOf(p('esp', 'GPIO2')))).toEqual([p('esp', 'GPIO2')]);
-    expect(n.nets().length).toBe(10);
+    expect(n.nets().length).toBe(12);
   });
 });

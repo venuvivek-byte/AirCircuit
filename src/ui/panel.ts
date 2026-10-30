@@ -18,7 +18,7 @@ export class FpsCounter {
   }
 }
 
-export type ToolAction = 'arduino-uno' | 'esp32' | 'breadboard' | 'led' | 'resistor';
+export type ToolAction = 'arduino-uno' | 'esp32' | 'breadboard' | 'led' | 'resistor' | 'ir' | 'ultrasonic' | 'sound' | 'gas' | 'zoom' | 'code';
 
 const TOOLS: Array<[ToolAction, string]> = [
   ['arduino-uno', 'Arduino Uno'],
@@ -26,6 +26,12 @@ const TOOLS: Array<[ToolAction, string]> = [
   ['breadboard', 'Breadboard'],
   ['led', 'LED'],
   ['resistor', 'Resistor 220Ω'],
+  ['ir', 'IR sensor'],
+  ['ultrasonic', 'Ultrasonic'],
+  ['sound', 'Sound sensor'],
+  ['gas', 'Gas sensor (MQ-2)'],
+  ['code', '</> Code (C)'],
+  ['zoom', '🔍 Zoom (Z)'],
 ];
 
 /** Left toolbar of spawn buttons. Buttons carry `data-action` so hand "clicks" can find them by hit-testing. */
@@ -35,6 +41,7 @@ export class Toolbar {
       const b = document.createElement('button');
       b.textContent = label;
       b.dataset.action = action;
+      if (action === 'zoom' || action === 'code') b.dataset.dwellMs = String(config.interaction.dwellZoomMs);
       b.addEventListener('click', () => onAction(action));
       el.appendChild(b);
     }
@@ -92,6 +99,10 @@ export interface HintState {
   handCount: number;
   componentCount: number;
   action: 'idle' | 'grab' | 'wire' | 'holdWire';
+  /** 0..1 while a held wire counts down to unplugging an end, else null. */
+  detachProgress: number | null;
+  /** Hand in the scissor pose: fingers spread, and whether a wire is targeted. */
+  scissors: { open: boolean; aimed: boolean } | null;
 }
 
 /** One-line contextual onboarding hint at the bottom of the screen. */
@@ -115,21 +126,32 @@ function hintFor(s: HintState): [string, boolean] {
     if (s.camera === 'error') {
       return ['Camera unavailable (close other apps/tabs using it; retrying). Mouse mode: drag parts, drag pin→pin to wire, Enter runs.', true];
     }
-    if (s.action === 'wire') return ['Release on another pin to connect the wire.', false];
+    if (s.action === 'wire') return ['Release on a pin to plug in · release elsewhere to leave the end loose · trash deletes.', false];
+    if (s.action === 'holdWire') return [detachHint(s.detachProgress, 'drag to the trash to delete'), false];
     if (s.action === 'grab') return ['Drop near the breadboard to plug in · wheel / R rotates · drop on the trash to delete.', false];
     if (s.componentCount === 0) return ['Mouse mode: click a part on the left to spawn it.', false];
-    return ['Drag parts · drag pin→pin to wire · R / wheel rotate · Delete removes · Enter run · Space stop · M hands', false];
+    return ['Drag parts · drag pin→pin to wire · R / wheel rotate · Delete removes · C code · Z zoom · Enter run · Space stop · M hands', false];
   }
   if (s.camera === 'starting') return ['Waiting for camera permission…', false];
   if (s.camera === 'error') return ['Camera blocked or missing. Allow camera access and reload, or press M for mouse mode.', true];
   if (s.tracker === 'loading') return ['Loading hand tracking model…', false];
   if (s.tracker === 'error') return ['Hand tracking failed to load. Press M to use mouse mode.', true];
   if (s.handCount === 0) return ['Show your hand to the camera (about 50 cm away, good light).', false];
-  if (s.action === 'wire') return ['Keep pinching and move to another pin, then open your fingers to connect.', false];
-  if (s.action === 'grab') return ['Move your fist to carry · roll your wrist to rotate · open your hand to drop (snaps into breadboard) · drop on the trash to delete.', false];
-  if (s.action === 'holdWire') return ['Drop the wire on the trash to delete it, or open fingers to keep it.', false];
-  if (s.componentCount === 0) return ['Hold your index fingertip on a part in the left toolbar for 5 s to spawn it.', false];
-  return ['Palm over a part + make a FIST to grab · roll wrist to rotate · PINCH a pin to wire · fingertip on toolbar 5 s spawns · push a 3D button to Run.', false];
+  if (s.scissors) {
+    if (!s.scissors.aimed) return ['✌ Scissors: move the point between your two fingertips onto a wire (it turns red).', false];
+    return [s.scissors.open ? '✂ Close your two fingers to cut the red wire.' : '✌ Spread your two fingers, then close them to cut the red wire.', false];
+  }
+  if (s.action === 'wire') return ['Move until the yellow ring sits on the target pin and open your fingers to plug in · open in the air to leave the end loose · trash deletes.', false];
+  if (s.action === 'grab') return ['Move your fist to carry · roll wrist to rotate · push toward / pull back from the camera to zoom · open hand to drop (snaps into breadboard) · trash deletes.', false];
+  if (s.action === 'holdWire') return [detachHint(s.detachProgress, 'drop it on the trash to delete'), false];
+  if (s.componentCount === 0) return ['Hold your index fingertip on a part in the left toolbar for 2 s to spawn it.', false];
+  return ['Palm over a part + make a FIST to grab · roll wrist to rotate · PINCH a pin to wire · ✌ snip a wire to cut it · fingertip on toolbar 2 s spawns · C / </> Code to program the board · push a 3D button to Run · Z / 🔍 zooms.', false];
+}
+
+function detachHint(progress: number | null, trash: string): string {
+  if (progress === null) return `Holding the wire: ${trash}, or let go to keep it.`;
+  const left = (config.interaction.wireDetachMs * (1 - progress)) / 1000;
+  return `Hold still ${left.toFixed(1)} s to unplug the nearest end (yellow ring) · or ${trash}.`;
 }
 
 export interface StatusInfo {

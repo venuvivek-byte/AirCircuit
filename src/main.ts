@@ -1,22 +1,28 @@
+import * as THREE from 'three';
 import { config } from './config';
 import { startWebcam } from './camera/webcam';
 import { Board } from './components/board';
 import { Led } from './components/led';
+import { Sensor } from './components/sensor';
+import { SENSORS, type SensorEnv } from './components/sensors';
 import { buildNetlist, type Netlist } from './sim/netlist';
-import { Simulator } from './sim/simulator';
+import { Machine } from './sim/machine';
 import type { Circuit } from './sim/types';
 import { HandTracker } from './tracking/handTracker';
 import { handSize } from './tracking/gestures';
-import { HandControl } from './scene/handControl';
+import { HandControl, type HandFrame } from './scene/handControl';
 import { HandSmoother, TrackingRateController } from './tracking/smoothing';
 import { LM, type TrackedHand } from './tracking/types';
-import { SceneManager } from './scene/sceneManager';
+import { SceneManager, type ZoomView } from './scene/sceneManager';
 import { Interaction, type Grip, type PointerState } from './scene/interaction';
 import { handDepthZ, videoToScreen } from './scene/mapping';
 import { World, type PinHit } from './scene/world';
 import { FpsCounter, HintBar, MessagesPanel, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
 import { ControlButtons, type ControlAction } from './ui/controls';
 import { SkeletonOverlay } from './ui/skeleton';
+import { CodePanel } from './ui/codePanel';
+import { SensorPanel } from './ui/sensorPanel';
+import { Microphone, senseEnvironment } from './scene/sensing';
 import { validate, type ValidationMessage } from './sim/validator';
 
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -45,9 +51,23 @@ const hintBar = new HintBar(document.getElementById('hint')!);
 const controls = new ControlButtons(sceneManager, (a) => onControl(a));
 
 // Dev-only handle for automated browser checks.
-if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction, controls } });
+if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction, controls, get machine() { return machine; } } });
 
-new Toolbar(document.getElementById('toolbar')!, (action) => world.spawn(action));
+new Toolbar(document.getElementById('toolbar')!, (action) => {
+  if (action === 'zoom') toggleZoom();
+  else if (action === 'code') codePanel.toggle();
+  else world.spawn(action);
+});
+
+/** Zoom onto the part under the pointer, else the breadboard, else the workspace centre; or zoom back out. */
+function toggleZoom(): void {
+  if (sceneManager.zoomed) {
+    sceneManager.zoomTo(null);
+    return;
+  }
+  const c = interaction.grabbed ?? interaction.hoverComponent ?? world.components.find((x) => x.type === 'breadboard');
+  sceneManager.zoomTo(c ? c.root.getWorldPosition(new THREE.Vector3()) : sceneManager.workspace.getWorldPosition(new THREE.Vector3()));
+}
 
 // ---- Mouse mode (key M) ----
 const mouse: PointerState = { px: 0, py: 0, down: false };
@@ -58,7 +78,17 @@ function setInput(mode: 'hand' | 'mouse'): void {
   document.body.classList.toggle('mouse-mode', mode === 'mouse');
 }
 
+/** Keys held for the environment: V = loud noise, G = gas leak. */
+const held = new Set<string>();
+window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
+window.addEventListener('blur', () => held.clear());
+
 window.addEventListener('keydown', (e) => {
+  // Typing in the code editor must not trigger shortcuts.
+  const t = e.target;
+  if (t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement) return;
+  if (!e.repeat) held.add(e.key.toLowerCase());
+  if (e.key === 'c' || e.key === 'C') codePanel.toggle();
   if (e.key === 'm' || e.key === 'M') {
     autoMouse = false;
     setInput(status.input === 'mouse' ? 'hand' : 'mouse');
@@ -73,6 +103,7 @@ window.addEventListener('keydown', (e) => {
     onControl('stop');
   }
   if (e.key === 'n' || e.key === 'N') onControl('reset');
+  if (e.key === 'z' || e.key === 'Z') toggleZoom();
 });
 // Track on window so dragging across the toolbar doesn't cancel an action.
 window.addEventListener('pointermove', (e) => {
@@ -107,6 +138,7 @@ const handControl = new HandControl(handToScreen);
 const skeleton = new SkeletonOverlay(document.getElementById('skeleton') as HTMLCanvasElement, handToScreen);
 let lastHandPointer: PointerState | null = null;
 let lastGrips: Array<Grip | null> = [];
+let lastScissors: HandFrame['scissors'] = null;
 
 function landmarkToScreen(hand: TrackedHand, index: number): { px: number; py: number } {
   const p = hand.landmarks[index];
@@ -132,7 +164,7 @@ function setDwell(button: HTMLElement | null, now: number): void {
     Object.assign(dwell, { button, since: now, fired: false });
   }
   if (!button || dwell.fired) return;
-  const ms = config.interaction.dwellSpawnMs;
+  const ms = Number(button.dataset.dwellMs) || config.interaction.dwellSpawnMs;
   const progress = Math.min(1, (now - dwell.since) / ms);
   button.style.setProperty('--dwell', progress.toFixed(3));
   button.dataset.dwell = `${Math.ceil((ms - (now - dwell.since)) / 1000)}s`;
@@ -151,9 +183,10 @@ function updateHandInput(hands: TrackedHand[], now: number): void {
   const primary = hands[0];
 
   // Toolbar: point with the index fingertip (open hand) and hold still.
-  const tip = primary && frame.grip === null && !interaction.busy ? landmarkToScreen(primary, LM.INDEX_TIP) : null;
+  const tip =
+    primary && frame.grip === null && !frame.scissors && !interaction.busy ? landmarkToScreen(primary, LM.INDEX_TIP) : null;
   const button = tip ? uiButtonAt(tip.px, tip.py) : null;
-  setDwell(button?.closest('#toolbar') ? button : null, now);
+  setDwell(button?.closest('#toolbar, #code, #sensors') ? button : null, now);
 
   // 3D Run / Stop / Reset: pinch on them, or push with the index fingertip (depth from palm size).
   let onControl = false;
@@ -170,23 +203,82 @@ function updateHandInput(hands: TrackedHand[], now: number): void {
   // Closing a pinch into a fist (or back) switches tools: drop the half-done action.
   if (frame.gripSwitched) interaction.cancel();
   interaction.update(frame.pointer && (onControl ? { ...frame.pointer, down: false } : frame.pointer));
+  interaction.scissors(frame.scissors);
+  lastScissors = frame.scissors;
   if (frame.rotation) interaction.rotateGrabbed(frame.rotation.yaw, frame.rotation.pitch);
+  updateDepthZoom(frame.depth);
+}
+
+/** View when the current fist grab started: the base the depth zoom scales from. */
+let preGrabView: ZoomView | null = null;
+const heldPos = new THREE.Vector3();
+
+/**
+ * Fist push toward the camera zooms in on the held part, pulling back zooms out.
+ * Opening the fist keeps whatever zoom was reached (Z / 🔍 zooms back out).
+ */
+function updateDepthZoom(depth: number | null): void {
+  const held = interaction.grabbed;
+  if (depth === null || !held) {
+    preGrabView = null;
+    return;
+  }
+  preGrabView ??= sceneManager.view;
+  const { gain, min, max } = config.zoom.depth;
+  const zoom = Math.min(max, Math.max(min, preGrabView.zoom * depth ** gain));
+  // Zoom about the part so it stays under the fist instead of the view jumping.
+  sceneManager.zoomAbout(held.root.getWorldPosition(heldPos), zoom);
 }
 
 // ---- Simulation + validator ----
-const simulator = new Simulator();
+const machine = new Machine();
 let circuit: Circuit = world.toCircuit();
 let netlist: Netlist = buildNetlist(circuit);
 let messages: ValidationMessage[] = [];
 let circuitVersion = -1;
 
+const codePanel = new CodePanel(document.getElementById('code')!, {
+  boards: () => world.components.filter((c): c is Board => c instanceof Board).map((b) => ({ id: b.id, kind: b.def.kind })),
+  runningSource: (b) => machine.sourceFor(b.id, b.kind),
+  upload: (id, program) => machine.upload(id, program),
+  serialLog: (id) => machine.serialLog(id),
+  clearSerial: (id) => machine.clearLog(id),
+  runtimeError: (id) => machine.runtimeError(id),
+});
+
+// ---- Sensor environment: hand / mouse position, microphone, keys ----
+const mic = new Microphone();
+const sensorPanel = new SensorPanel(document.getElementById('sensors')!, () => void mic.start());
+let gasLevel = 0;
+let lastSimTime = 0;
+let sensorEnv = new Map<string, SensorEnv>();
+
+/** Screen points of real things the IR / ultrasonic sensors can see. */
+function sensorProbes(hands: TrackedHand[]): Array<{ px: number; py: number }> {
+  if (status.input === 'mouse') return mouseInside ? [{ px: mouse.px, py: mouse.py }] : [];
+  return hands.flatMap((h) => [landmarkToScreen(h, LM.MIDDLE_MCP), landmarkToScreen(h, LM.INDEX_TIP)]);
+}
+
+function updateEnvironment(hands: TrackedHand[], now: number): void {
+  const dt = Math.min(0.1, (now - lastSimTime) / 1000);
+  lastSimTime = now;
+  const s = config.sensors;
+  if (held.has('g')) gasLevel = Math.min(1, gasLevel + s.gasRisePerSec * dt);
+  else if (gasLevel > sensorPanel.gas) gasLevel = Math.max(sensorPanel.gas, gasLevel - s.gasFallPerSec * dt);
+  else gasLevel = sensorPanel.gas;
+  if (held.has('g') || gasLevel !== sensorPanel.gas) sensorPanel.setGas(gasLevel);
+  const sound = held.has('v') ? 1 : Math.max(sensorPanel.sound, mic.level());
+  sensorEnv = senseEnvironment(sceneManager, world, sensorProbes(hands), sound, gasLevel);
+}
+
 function onControl(action: ControlAction): void {
-  if (action === 'run') simulator.start(performance.now());
-  else if (action === 'stop') simulator.stop();
+  if (action === 'run') machine.start();
+  else if (action === 'stop') machine.stop();
   else {
-    simulator.reset();
+    machine.reset();
     interaction.update(null);
     world.clear();
+    sceneManager.zoomTo(null);
   }
 }
 
@@ -197,11 +289,38 @@ function updateSimulation(now: number): void {
     circuit = world.toCircuit();
     netlist = buildNetlist(circuit);
     messages = validate(circuit, netlist);
+    const loose = world.wires.filter((w) => !w.connected).length;
+    if (loose > 0) {
+      const text = loose === 1 ? 'A wire has a loose end (not connected).' : `${loose} wires have loose ends (not connected).`;
+      messages = [{ level: 'warning', code: 'loose-wire', text }, ...messages];
+    }
   }
-  const states = simulator.step(now, circuit, netlist);
-  for (const c of world.components) if (c instanceof Led) c.setLit(states.get(c.id) ?? false);
-  controls.setRunning(simulator.running);
-  messagesPanel.update(messages, simulator.running, world.components.some((c) => c.type === 'led'));
+  const out = machine.step(now, circuit, netlist, sensorEnv);
+  const rows = [];
+  for (const c of world.components) {
+    if (c instanceof Led) c.setBrightness(out.leds.get(c.id) ?? 0);
+    else if (c instanceof Board) c.setLeds(machine.running, out.builtin.get(c.id) ?? false);
+    else if (c instanceof Sensor) {
+      const st = out.sensors.get(c.id) ?? { powered: false, active: false };
+      c.setState(st.powered, st.active);
+      rows.push({ id: c.id, kind: c.def.kind, env: sensorEnv.get(c.id)!, powered: st.powered });
+    }
+  }
+  sensorPanel.update(rows.filter((r) => r.env), mic.state);
+  controls.setRunning(machine.running);
+
+  // A wired-up sensor that isn't powered while running is the most common beginner mistake.
+  const unpowered: ValidationMessage[] = machine.running
+    ? rows
+        .filter((r) => !r.powered && circuit.connections.some((k) => k.a.componentId === r.id || k.b.componentId === r.id))
+        .map((r) => ({
+          level: 'warning',
+          code: 'sensor-power',
+          text: `${SENSORS[r.kind].label} is not powered: connect VCC to 5V / 3V3 and GND to GND.`,
+        }))
+    : [];
+  messagesPanel.update([...unpowered, ...messages], machine.running, world.components.some((c) => c.type === 'led'));
+  codePanel.update(now);
 }
 
 function pinLabel(hit: PinHit): string {
@@ -209,6 +328,7 @@ function pinLabel(hit: PinHit): string {
   if (c instanceof Board) return `${c.def.label} · ${hit.pin}`;
   if (c.type === 'led') return hit.pin === 'anode' ? 'LED anode (+)' : 'LED cathode (−)';
   if (c.type === 'resistor') return `Resistor 220Ω · leg ${hit.pin}`;
+  if (c instanceof Sensor) return `${c.def.label} · ${hit.pin}`;
   return `Breadboard · ${hit.pin}`;
 }
 
@@ -263,6 +383,7 @@ let frameIndex = 0;
 
 function loop(now: number): void {
   fpsCounter.tick(now);
+  sceneManager.stepZoom();
   status.fps = fpsCounter.fps;
 
   // Only judge FPS once tracking is running, so model loading doesn't trigger the fallback.
@@ -280,10 +401,13 @@ function loop(now: number): void {
     controls.updateFingertip(null);
     setDwell(null, now);
     lastGrips = [];
+    lastScissors = null;
+    interaction.scissors(null);
   } else {
     updateHandInput(hands, now);
   }
 
+  updateEnvironment(hands, now);
   updateSimulation(now);
 
   const pointer = status.input === 'mouse' ? (mouseInside ? mouse : null) : lastHandPointer;
@@ -304,9 +428,11 @@ function loop(now: number): void {
     handCount: hands.length,
     componentCount: world.components.length,
     action: interaction.action,
+    detachProgress: interaction.detachProgress,
+    scissors: lastScissors && { open: lastScissors.open, aimed: !!interaction.cutWire },
   });
 
-  skeleton.draw(status.input === 'hand' ? hands : [], lastGrips);
+  skeleton.draw(status.input === 'hand' ? hands : [], lastGrips, lastScissors);
   sceneManager.render();
   statusPanel.update(status);
   frameIndex++;

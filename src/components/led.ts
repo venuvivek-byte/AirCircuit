@@ -40,10 +40,18 @@ export class Led extends SceneComponent {
     this.root.add(this.light);
   }
 
+  private brightness = 0;
+
   setLit(on: boolean): void {
-    if (on === this.lit) return;
-    this.lit = on;
-    this.bodyMat.emissiveIntensity = on ? 2.5 : 0;
-    this.light.intensity = on ? 3 : 0;
+    this.setBrightness(on ? 1 : 0);
+  }
+
+  /** 0..1 (PWM duty from analogWrite). */
+  setBrightness(b: number): void {
+    if (b === this.brightness) return;
+    this.brightness = b;
+    this.lit = b > 0;
+    this.bodyMat.emissiveIntensity = 2.5 * b;
+    this.light.intensity = 3 * b;
   }
 }

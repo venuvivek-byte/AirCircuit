@@ -6,15 +6,24 @@ import { Breadboard } from '../components/breadboard';
 import type { SceneComponent } from '../components/component';
 import { Led } from '../components/led';
 import { Resistor } from '../components/resistor';
-import { Wire } from '../components/wire';
+import { Sensor } from '../components/sensor';
+import { SENSORS, type SensorKind } from '../components/sensors';
+import { Wire, isPinEnd, wireCurve, type EndName, type WireEnd } from '../components/wire';
 import type { Circuit, Connection, PinRef } from '../sim/types';
 import type { SceneManager } from './sceneManager';
 
-export type SpawnKind = BoardKind | 'breadboard' | 'led' | 'resistor';
+export type SpawnKind = BoardKind | SensorKind | 'breadboard' | 'led' | 'resistor';
 
 export interface PinHit {
   component: SceneComponent;
   pin: string;
+  /** Screen distance in px. */
+  dist: number;
+}
+
+export interface LooseEndHit {
+  wire: Wire;
+  end: EndName;
   /** Screen distance in px. */
   dist: number;
 }
@@ -51,7 +60,8 @@ export class World {
       kind === 'breadboard' ? new Breadboard(id)
       : kind === 'led' ? new Led(id)
       : kind === 'resistor' ? new Resistor(id)
-      : new Board(id, kind);
+      : kind in SENSORS ? new Sensor(id, kind as SensorKind)
+      : new Board(id, kind as BoardKind);
 
     const [x, z] = config.components.spawnPositions[kind];
     const off = ((n - 1) % 5) * config.components.spawnOffset;
@@ -68,7 +78,8 @@ export class World {
     this.unsnap(c);
     // Anything plugged into a removed breadboard is now loose.
     for (const [id, ins] of [...this.insertions]) if (ins.breadboardId === c.id) this.insertions.delete(id);
-    [...this.wires].filter((w) => w.a.componentId === c.id || w.b.componentId === c.id).forEach((w) => this.removeWire(w));
+    const touches = (e: WireEnd) => isPinEnd(e) && e.componentId === c.id;
+    [...this.wires].filter((w) => touches(w.a) || touches(w.b)).forEach((w) => this.removeWire(w));
     this.sm.workspace.remove(c.root);
     c.dispose();
     this.version++;
@@ -84,19 +95,34 @@ export class World {
 
   // ---- Wires ----
 
-  addWire(a: PinRef, b: PinRef): Wire | null {
-    if (a.componentId === b.componentId && a.pin === b.pin) return null;
-    const dup = this.wires.some(
-      (w) =>
-        (sameRef(w.a, a) && sameRef(w.b, b)) || (sameRef(w.a, b) && sameRef(w.b, a)),
-    );
-    if (dup) return null;
+  /** Adds a wire; `b` may be a loose point (a wire being drawn). Null for a same-pin or duplicate wire. */
+  addWire(a: PinRef, b: WireEnd): Wire | null {
+    if (isPinEnd(b) && (sameRef(a, b) || this.isDuplicate(a, b))) return null;
     const w = new Wire(this.nextId('wire'), a, b);
     this.wires.push(w);
     this.sm.workspace.add(w.mesh);
     this.updateWires();
     this.version++;
     return w;
+  }
+
+  /** True when some other wire already joins pins a and b. */
+  isDuplicate(a: PinRef, b: PinRef, except?: Wire): boolean {
+    return this.wires.some(
+      (w) =>
+        w !== except &&
+        w.connected &&
+        ((sameRef(w.a as PinRef, a) && sameRef(w.b as PinRef, b)) || (sameRef(w.a as PinRef, b) && sameRef(w.b as PinRef, a))),
+    );
+  }
+
+  /** Plug a wire end into a pin or leave it loose at a point. */
+  setWireEnd(w: Wire, end: EndName, value: WireEnd): void {
+    const was = w[end];
+    w[end] = value;
+    // Moving a loose point around doesn't change connectivity; plugging / unplugging does.
+    if (isPinEnd(was) || isPinEnd(value)) this.version++;
+    this.updateWires();
   }
 
   removeWire(w: Wire): void {
@@ -115,11 +141,51 @@ export class World {
     return target.copy(p.local).applyMatrix4(c.root.matrix);
   }
 
+  /** Workspace-local position of a wire end. */
+  endLocal(e: WireEnd, target = new THREE.Vector3()): THREE.Vector3 {
+    return isPinEnd(e) ? this.pinLocal(e, target) : target.copy(e.point);
+  }
+
   /** Re-shapes wires whose endpoints moved (cheap no-op otherwise). */
   updateWires(): void {
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
-    for (const w of this.wires) w.update(this.pinLocal(w.a, a), this.pinLocal(w.b, b));
+    for (const w of this.wires) w.update(this.endLocal(w.a, a), this.endLocal(w.b, b));
+  }
+
+  /** Screen position of a wire end. */
+  endScreen(w: Wire, end: EndName): { px: number; py: number; behind: boolean } {
+    return this.sm.worldToScreen(this.endLocal(w[end]).applyMatrix4(this.sm.workspace.matrixWorld));
+  }
+
+  /** Nearest loose wire end to a screen pixel within the pin pick radius. */
+  looseEndAt(px: number, py: number, radius = config.interaction.pinPickRadiusPx): LooseEndHit | null {
+    let best: LooseEndHit | null = null;
+    for (const wire of this.wires) {
+      for (const end of ['a', 'b'] as const) {
+        if (isPinEnd(wire[end])) continue;
+        const s = this.endScreen(wire, end);
+        const dist = Math.hypot(s.px - px, s.py - py);
+        if (!s.behind && dist <= radius && (!best || dist < best.dist)) best = { wire, end, dist };
+      }
+    }
+    return best;
+  }
+
+  /** Wire whose on-screen curve passes nearest a screen pixel, within `radius` px (forgiving, unlike wireAt). */
+  wireNear(px: number, py: number, radius: number): Wire | null {
+    let best: { w: Wire; d: number } | null = null;
+    const m = this.sm.workspace.matrixWorld;
+    for (const w of this.wires) {
+      const pts = wireCurve(this.endLocal(w.a), this.endLocal(w.b))
+        .getPoints(24)
+        .map((p) => this.sm.worldToScreen(p.applyMatrix4(m)));
+      for (let i = 1; i < pts.length; i++) {
+        const d = segmentDist(px, py, pts[i - 1], pts[i]);
+        if (d <= radius && (!best || d < best.d)) best = { w, d };
+      }
+    }
+    return best?.w ?? null;
   }
 
   wireAt(px: number, py: number): Wire | null {
@@ -146,7 +212,7 @@ export class World {
    * moves the first leg onto the nearest hole, and accepts if every leg then sits on a hole.
    */
   trySnap(c: SceneComponent): boolean {
-    if (c.type !== 'led' && c.type !== 'resistor') return false;
+    if (c.type !== 'led' && c.type !== 'resistor' && c.type !== 'sensor') return false;
     const { snapRadius, legTolerance } = config.snapping;
     const saved = { pos: c.root.position.clone(), rot: c.root.rotation.clone() };
 
@@ -196,7 +262,8 @@ export class World {
     return {
       components: this.components.map((c) => c.toSim()),
       connections: [
-        ...this.wires.map((w) => ({ a: w.a, b: w.b })),
+        // Wires with a loose end carry no current.
+        ...this.wires.filter((w) => w.connected).map((w) => ({ a: w.a as PinRef, b: w.b as PinRef })),
         ...[...this.insertions.values()].flatMap((i) => i.connections),
       ],
     };
@@ -235,6 +302,35 @@ export class World {
     }
     return best;
   }
+
+  /**
+   * Like pinAt, but keeps `prev` while the pointer stays within the stick radius of it, unless another
+   * pin is clearly closer. Stops hand tremor flicking the target between neighbouring holes.
+   */
+  pinAtSticky(px: number, py: number, prev: PinHit | null): PinHit | null {
+    const next = this.pinAt(px, py);
+    if (!prev || !this.components.includes(prev.component) || (next && sameHit(next, prev))) return next;
+    const { pinPickRadiusPx, pinStickRadiusPx, pinSwitchMarginPx } = config.interaction;
+    const s = this.sm.worldToScreen(prev.component.pinWorld(prev.pin));
+    const penalty = prev.component.type === 'breadboard' ? pinPickRadiusPx * 0.5 : 0;
+    const d = Math.hypot(s.px - px, s.py - py);
+    if (s.behind || d > pinStickRadiusPx) return next;
+    if (next && next.dist < d + penalty - pinSwitchMarginPx) return next;
+    return { component: prev.component, pin: prev.pin, dist: d + penalty };
+  }
+}
+
+/** Distance from point (px, py) to the screen segment a-b. */
+function segmentDist(px: number, py: number, a: { px: number; py: number }, b: { px: number; py: number }): number {
+  const dx = b.px - a.px;
+  const dy = b.py - a.py;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - a.px) * dx + (py - a.py) * dy) / len2)) : 0;
+  return Math.hypot(px - (a.px + t * dx), py - (a.py + t * dy));
+}
+
+function sameHit(a: PinHit, b: PinHit): boolean {
+  return a.component === b.component && a.pin === b.pin;
 }
 
 function sameRef(a: PinRef, b: PinRef): boolean {

@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { config } from '../config';
 
+export interface ZoomView {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
 /** Owns the transparent Three.js renderer, camera and lights drawn over the webcam feed. */
 export class SceneManager {
   readonly renderer: THREE.WebGLRenderer;
@@ -9,6 +15,8 @@ export class SceneManager {
   /** Virtual table tilted toward the camera; components live on its local y = 0 plane. */
   readonly workspace = new THREE.Group();
   private raycaster = new THREE.Raycaster();
+  /** Where the camera is easing to: centre (x, y) in world space and zoom factor. */
+  private zoomGoal: ZoomView = { x: 0, y: 0, zoom: 1 };
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
@@ -40,6 +48,52 @@ export class SceneManager {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  get zoomed(): boolean {
+    return this.zoomGoal.zoom !== 1;
+  }
+
+  /** The view the camera is easing to (centre x, y and zoom). */
+  get view(): ZoomView {
+    return { ...this.zoomGoal };
+  }
+
+  set view(v: ZoomView) {
+    this.zoomGoal = { ...v };
+  }
+
+  /** Change the zoom while keeping the world point `p` at the same spot on screen. */
+  zoomAbout(p: THREE.Vector3, zoom: number): void {
+    const g = this.zoomGoal;
+    const k = g.zoom / zoom;
+    this.zoomGoal = { x: p.x - k * (p.x - g.x), y: p.y - k * (p.y - g.y), zoom };
+  }
+
+  /** Zoom the camera onto a world point (null = back to the full view). Eased in stepZoom(). */
+  zoomTo(target: THREE.Vector3 | null, factor = config.zoom.factor): void {
+    this.zoomGoal = target ? { x: target.x, y: target.y, zoom: factor } : { x: 0, y: 0, zoom: 1 };
+  }
+
+  /** Advance the zoom animation one frame. Call before picking so rays use the current camera. */
+  stepZoom(): void {
+    const c = this.camera;
+    const g = this.zoomGoal;
+    const k = config.zoom.easing;
+    const done = Math.abs(c.zoom - g.zoom) < 1e-3 && Math.abs(c.position.x - g.x) < 1e-3 && Math.abs(c.position.y - g.y) < 1e-3;
+    if (done) {
+      if (c.zoom === g.zoom) return;
+      c.position.x = g.x;
+      c.position.y = g.y;
+      c.zoom = g.zoom;
+    } else {
+      // The camera keeps looking straight down -z, so panning it centres the target on screen.
+      c.position.x += (g.x - c.position.x) * k;
+      c.position.y += (g.y - c.position.y) * k;
+      c.zoom += (g.zoom - c.zoom) * k;
+    }
+    c.updateProjectionMatrix();
+    c.updateMatrixWorld();
   }
 
   /** World point on the plane z = worldZ under the given screen pixel. */

@@ -8,6 +8,8 @@ const PIN_COLORS = { gpio: '#ffffff', ground: '#9ad0ff', power: '#ff9a9a' } as c
 /** One generic board class; everything board-specific comes from `boards.ts` data. */
 export class Board extends SceneComponent {
   readonly def: BoardDef;
+  private onLed: THREE.MeshStandardMaterial;
+  private builtinLed: THREE.MeshStandardMaterial;
 
   constructor(id: string, kind: BoardKind) {
     super(id, 'board');
@@ -28,6 +30,21 @@ export class Board extends SceneComponent {
     );
     chip.position.y = h + 0.025;
     this.root.add(chip);
+
+    // Power "ON" LED (green) and the built-in "L" LED (orange on the Uno, blue on the ESP32).
+    const smd = (color: number, x: number, z: number, text: string) => {
+      const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0 });
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.05), mat);
+      m.position.set(x, h + 0.015, z);
+      this.root.add(m);
+      const l = makeLabel(text, '#dddddd', 0.05);
+      l.position.set(x, h + 0.06, z + 0.07);
+      this.root.add(l);
+      return mat;
+    };
+    const esp = kind === 'esp32';
+    this.onLed = smd(0x30ff50, esp ? -0.15 : 0.55, esp ? -0.85 : -0.3, 'ON');
+    this.builtinLed = smd(esp ? 0x3080ff : 0xffa020, esp ? 0.15 : 0.75, esp ? -0.85 : -0.3, esp ? 'IO2' : 'L');
 
     const title = makeLabel(this.def.label, '#ffffff', 0.16);
     title.position.set(0, h + 0.25, 0);
@@ -59,6 +76,12 @@ export class Board extends SceneComponent {
 
       this.pins.push({ name: pin.name, local: new THREE.Vector3(x, h + 0.09, z) });
     }
+  }
+
+  /** `powered`: the simulation is running; `builtin`: LED_BUILTIN is HIGH. */
+  setLeds(powered: boolean, builtin: boolean): void {
+    this.onLed.emissiveIntensity = powered ? 2 : 0;
+    this.builtinLed.emissiveIntensity = builtin ? 3 : 0;
   }
 
   override toSim(): SimComponent {
