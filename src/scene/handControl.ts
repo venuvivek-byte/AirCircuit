@@ -2,6 +2,9 @@ import { config } from '../config';
 import {
   DepthTracker,
   FistDetector,
+  PoseHold,
+  menuPose,
+  type MenuPose,
   PinchDetector,
   RotationTracker,
   ScissorDetector,
@@ -29,13 +32,15 @@ export interface HandFrame {
   depth: number | null;
   /** Primary hand in the scissor (V-sign) pose: cut point in screen px, spread state, snip this frame. */
   scissors: { px: number; py: number; open: boolean; snip: boolean } | null;
+  /** Menu pose (finger count): `fired` on the frame it opens a menu, `holding` + progress before that. */
+  menu: { fired: MenuPose | null; holding: MenuPose | null; progress: number };
 }
 
 /**
  * Turns smoothed hands into a pointer plus rotation for `Interaction`.
  * A fist grabs, moves and (by rolling the wrist) rotates components; a pinch draws wires.
  * Hand slot 0 is primary. If the second hand also grips while holding, a two-hand twist takes over yaw.
- * While holding, moving the fist toward / away from the camera reports `depth` (used to zoom).
+ * While holding, moving the fist toward / away from the camera reports `depth` (sizes the held part).
  * A V sign (index + middle out) is scissors: spreading then closing the two fingers on a wire cuts it.
  */
 export class HandControl {
@@ -45,6 +50,7 @@ export class HandControl {
   private twist = new TwoHandTwistTracker();
   private depthTracker = new DepthTracker();
   private scissorDetector = new ScissorDetector();
+  private poseHold = new PoseHold<MenuPose>();
   private twistBaseYaw = 0;
   private yawOffset = 0;
   private lastYaw = 0;
@@ -76,7 +82,8 @@ export class HandControl {
       this.twist.end();
       this.depthTracker.end();
       this.scissorDetector.update(null);
-      return { pointer: null, grip: null, gripStarted: false, gripSwitched: false, grips, rotation: null, depth: null, scissors: null };
+      const menu = this.poseHold.update(null, performance.now());
+      return { pointer: null, grip: null, gripStarted: false, gripSwitched: false, grips, rotation: null, depth: null, scissors: null, menu };
     }
 
     const anchor = grip === 'fist' ? palmCenter(primary.landmarks) : pinchPoint(primary.landmarks);
@@ -132,6 +139,10 @@ export class HandControl {
       scissors = { ...this.toScreen(cut.x, cut.y), open: sc.open, snip: sc.snip };
     }
 
-    return { pointer, grip, gripStarted, gripSwitched, grips, rotation, depth, scissors };
+    // Finger-count menu poses only with an empty, relaxed hand (no grip, not scissors).
+    const pose = grip === null && !sc.active ? menuPose(primary.world ?? primary.landmarks) : null;
+    const menu = this.poseHold.update(pose, performance.now());
+
+    return { pointer, grip, gripStarted, gripSwitched, grips, rotation, depth, scissors, menu };
   }
 }

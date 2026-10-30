@@ -6,129 +6,223 @@
     <title>AirCircuit</title>
     <link rel="icon" href="data:," />
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
-      #video {
-        position: fixed; inset: 0; width: 100%; height: 100%;
-        object-fit: cover; transform: scaleX(-1); /* mirror */
+      :root {
+        --glass: rgba(13, 16, 23, 0.74);
+        --glass-strong: rgba(13, 16, 23, 0.94);
+        --line: rgba(255, 255, 255, 0.09);
+        --line-strong: rgba(255, 255, 255, 0.18);
+        --text: #e9edf3;
+        --muted: #8e98aa;
+        --accent: #3ee0b5;
+        --accent-soft: rgba(62, 224, 181, 0.16);
+        --blue: #5aa8ff;
+        --warn: #ffb547;
+        --err: #ff6b6b;
+        --radius: 14px;
+        --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+        --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
       }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #05070a; color: var(--text); font-family: var(--sans); }
+      #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); /* mirror */ }
       #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-      #skeleton { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-      #right {
-        position: fixed; top: 12px; right: 12px; width: 280px;
-        display: flex; flex-direction: column; gap: 8px; pointer-events: none;
-      }
-      #status, #messages {
-        padding: 10px 12px; border-radius: 8px;
-        background: rgba(0, 0, 0, 0.6); color: #e6e6e6; font-size: 13px; line-height: 1.5;
-      }
-      #status .err { color: #ff7b7b; }
-      #messages h3 { margin: 0 0 6px; font-size: 13px; color: #aaa; font-weight: 600; }
-      #messages .msg { padding: 6px 8px; margin-top: 4px; border-radius: 5px; border-left: 4px solid; }
-      #messages .error { border-color: #ff4d4d; background: rgba(255, 60, 60, 0.15); }
-      #messages .warning { border-color: #ffb020; background: rgba(255, 176, 32, 0.15); }
-      #messages .ok { border-color: #3ddc84; background: rgba(61, 220, 132, 0.15); }
-      #messages .hint { color: #bbb; font-style: italic; }
-      #toolbar {
-        position: fixed; top: 12px; left: 12px; bottom: 112px; display: flex; flex-direction: column; flex-wrap: wrap;
-        align-content: flex-start; gap: 6px;
-      }
-      #toolbar button {
-        min-width: 140px; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.25); border-radius: 8px;
-        background: rgba(20, 20, 30, 0.7); color: #fff; font-size: 14px; text-align: left; cursor: pointer;
-      }
-      #toolbar button:hover, #toolbar button.hand-hover { background-color: rgba(60, 130, 255, 0.75); }
-      /* Hand-mode dwell: the button fills up while the fingertip rests on it. */
-      #toolbar button {
-        position: relative;
-        background-image: linear-gradient(to right, rgba(61, 220, 132, 0.8) calc(var(--dwell, 0) * 100%), transparent 0);
-      }
-      #toolbar button[data-dwell]::after {
-        content: attr(data-dwell); position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-        font-size: 12px; font-weight: 600; color: #fff;
-      }
-      #tooltip {
-        position: fixed; left: 0; top: 0; display: none; pointer-events: none;
-        padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,0.8); color: #ffe27a; font-size: 13px;
-      }
+      #skeleton { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; }
       body.mouse-mode #scene { cursor: crosshair; }
-      #trash {
-        position: fixed; left: 12px; bottom: 12px; width: 140px; height: 90px;
-        display: flex; align-items: center; justify-content: center; text-align: center;
-        border: 2px dashed rgba(255,120,120,0.7); border-radius: 10px;
-        background: rgba(60, 0, 0, 0.45); color: #ffb3b3; font-size: 13px; pointer-events: none;
+      /* Focus mode: a black "blanket" replaces the camera image; parts and the hand skeleton stay. */
+      body.focus-mode #video { visibility: hidden; }
+      body.focus-mode {
+        background:
+          radial-gradient(ellipse 55% 45% at 50% 58%, rgba(62, 224, 181, 0.10), transparent 70%),
+          linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 40px 40px,
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 40px 40px,
+          #030405;
       }
-      #hint {
-        position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: 70vw;
-        padding: 10px 16px; border-radius: 22px; pointer-events: none; text-align: center;
-        background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 15px;
-      }
-      #hint.warn { background: rgba(140, 40, 0, 0.8); }
-      #sensors {
-        padding: 10px 12px; border-radius: 8px; pointer-events: auto;
-        background: rgba(0, 0, 0, 0.6); color: #e6e6e6; font-size: 13px; line-height: 1.5;
-      }
-      #sensors h3 { margin: 0 0 6px; font-size: 13px; color: #aaa; font-weight: 600; }
-      #sensors .sens-row.off { color: #ff9a7a; }
-      #sensors .sens-bar { letter-spacing: -2px; color: #7ad0ff; }
-      #sensors .sens-ctl { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-      #sensors input[type=range] { flex: 1; }
-      #sensors button, #code button {
-        padding: 6px 10px; border: 1px solid rgba(255,255,255,0.25); border-radius: 6px;
-        background: rgba(40, 40, 55, 0.9); color: #fff; font-size: 12px; cursor: pointer; position: relative;
-        background-image: linear-gradient(to right, rgba(61, 220, 132, 0.8) calc(var(--dwell, 0) * 100%), transparent 0);
-      }
-      #sensors button:hover, #code button:hover, #sensors button.hand-hover, #code button.hand-hover { background-color: rgba(60, 130, 255, 0.75); }
-      #sensors .hint { color: #bbb; font-size: 12px; margin-top: 6px; }
+      body.focus-mode #toolbar button[data-action=focus] { background-color: var(--accent-soft); border-color: rgba(62, 224, 181, 0.6); }
 
+      .glass {
+        background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
+        backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); box-shadow: var(--shadow);
+      }
+      h3 { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+      .muted { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      kbd { font: 600 10px var(--mono); color: var(--muted); padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; }
+
+      /* Every pressable control. Hand mode: the fill grows while the fingertip dwells on it. */
+      button {
+        position: relative; font: inherit; color: var(--text); cursor: pointer;
+        border: 1px solid var(--line-strong); border-radius: 10px; background-color: rgba(255, 255, 255, 0.05);
+        background-image: linear-gradient(to right, rgba(62, 224, 181, 0.55) calc(var(--dwell, 0) * 100%), transparent 0);
+        transition: background-color 0.15s, border-color 0.15s, transform 0.15s;
+      }
+      button:hover, button.hand-hover { background-color: rgba(90, 168, 255, 0.22); border-color: rgba(90, 168, 255, 0.7); }
+      button.hand-hover { transform: scale(1.03); }
+      button[data-dwell]::after {
+        content: attr(data-dwell); position: absolute; right: 6px; top: 4px;
+        font: 700 10px var(--mono); color: #fff; background: rgba(0, 0, 0, 0.55); padding: 1px 4px; border-radius: 4px;
+      }
+      button:disabled { opacity: 0.45; cursor: default; }
+
+      /* ---- Left dock ---- */
+      #toolbar {
+        position: fixed; top: 14px; left: 14px; width: 92px; padding: 8px; z-index: 6;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      #toolbar .brand { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 4px 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+      #toolbar .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+      #toolbar button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px 6px; border-color: transparent; background-color: transparent; }
+      #toolbar button:hover, #toolbar button.hand-hover { border-color: rgba(90, 168, 255, 0.6); }
+      #toolbar button svg { width: 34px; height: 24px; color: var(--accent); }
+      #toolbar .dock-label { font-size: 12px; font-weight: 600; }
+
+      /* ---- Right column ---- */
+      #right { position: fixed; top: 14px; right: 14px; width: 300px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; z-index: 4; }
+      #status { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px; }
+      .chip { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap; }
+      .chip.ok::before { content: '●'; color: var(--accent); margin-right: 5px; }
+      .chip.err { color: var(--err); background: rgba(255, 107, 107, 0.12); }
+      .chip.input { color: var(--text); background: var(--accent-soft); }
+      #messages, #sensors { padding: 12px 14px; font-size: 13px; line-height: 1.45; }
+      .pill { font-size: 10px; padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: var(--muted); letter-spacing: 0.05em; }
+      .pill.on { background: var(--accent-soft); color: var(--accent); }
+      #messages .msg { padding: 7px 10px; margin-top: 6px; border-radius: 8px; border-left: 3px solid; }
+      #messages .error { border-color: var(--err); background: rgba(255, 107, 107, 0.12); }
+      #messages .warning { border-color: var(--warn); background: rgba(255, 181, 71, 0.12); }
+      #messages .ok { border-color: var(--accent); background: var(--accent-soft); }
+      #messages .hint { color: var(--muted); }
+      #sensors { pointer-events: auto; }
+      #sensors .sens-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--line); font-family: var(--mono); font-size: 12px; }
+      #sensors .sens-row.off { color: var(--warn); }
+      #sensors .sens-bar { letter-spacing: -2px; color: var(--blue); }
+      #sensors .sens-ctl { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+      #sensors input[type=range] { flex: 1; accent-color: var(--accent); }
+      #sensors button, #code button { padding: 6px 10px; font-size: 12px; }
+      #sensors .hint { color: var(--muted); font-size: 11px; margin-top: 8px; }
+
+      /* ---- Floating bits ---- */
+      #tooltip {
+        position: fixed; left: 0; top: 0; display: none; pointer-events: none; z-index: 8;
+        padding: 4px 9px; border-radius: 6px; background: var(--glass-strong); border: 1px solid var(--line-strong);
+        color: #ffe27a; font: 600 12px var(--mono);
+      }
+      #trash {
+        position: fixed; left: 14px; bottom: 14px; width: 92px; height: 84px; z-index: 3;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center;
+        border: 1.5px dashed rgba(255, 107, 107, 0.55); border-radius: var(--radius);
+        background: rgba(60, 10, 14, 0.5); color: #ffb3b3; font-size: 11px; pointer-events: none; transition: all 0.15s;
+      }
+      #trash b { font-size: 22px; }
+      #trash.active { background: rgba(220, 40, 50, 0.75); color: #fff; transform: scale(1.06); border-style: solid; }
+      #hint {
+        position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: min(760px, 64vw); z-index: 4;
+        padding: 10px 18px; border-radius: 999px; pointer-events: none; text-align: center; font-size: 14px; line-height: 1.4;
+        background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      }
+      #hint.warn { background: rgba(120, 40, 10, 0.85); border-color: rgba(255, 181, 71, 0.5); }
+      #toast {
+        position: fixed; left: 50%; bottom: 84px; transform: translate(-50%, 0); opacity: 0; z-index: 30; max-width: 70vw;
+        padding: 10px 18px; border-radius: 12px; font-size: 14px; pointer-events: none;
+        background: var(--glass-strong); border: 1px solid rgba(62, 224, 181, 0.45); box-shadow: var(--shadow); transition: opacity 0.25s ease, transform 0.25s ease;
+      }
+      #toast.show { opacity: 1; transform: translate(-50%, -6px); }
+
+      /* ---- Menu sheets (catalog, saved circuits) ---- */
+      .overlay {
+        position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 28px 130px;
+        background: rgba(3, 5, 8, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      }
+      .overlay.open { display: flex; animation: fade 0.18s ease; }
+      @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+      .sheet {
+        width: min(1000px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden;
+        background: var(--glass-strong); border: 1px solid var(--line-strong); border-radius: 20px; box-shadow: var(--shadow);
+      }
+      .sheet header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px 14px; border-bottom: 1px solid var(--line); }
+      .sheet h2 { margin: 0; font-size: 22px; font-weight: 700; }
+      .sheet-gesture { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+      .sheet-close { width: 52px; height: 52px; font-size: 18px; border-radius: 14px; flex: none; }
+      .sheet-body { overflow: auto; padding: 16px 24px 24px; }
+      .sheet-body h3 { margin: 14px 0 10px; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 12px; }
+      .card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; text-align: left; border-radius: 14px; min-height: 150px; }
+      .card .card-art { width: 100%; height: 74px; display: flex; align-items: center; justify-content: center; border-radius: 10px; margin-bottom: 6px;
+        background: radial-gradient(ellipse at 50% 120%, rgba(62, 224, 181, 0.12), rgba(255, 255, 255, 0.03)); color: var(--accent); }
+      .card .card-art svg { height: 60px; width: auto; }
+      .card b { font-size: 14px; }
+      .card small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+      .card.template { border-color: rgba(62, 224, 181, 0.3); }
+      .card.new-save { border-style: dashed; }
+      .save-item { position: relative; display: flex; }
+      .save-item .card { flex: 1; }
+      .save-del { position: absolute; right: 8px; top: 8px; width: 40px; height: 40px; padding: 0; font-size: 16px; background-color: rgba(0, 0, 0, 0.4); }
+      .save-del:hover, .save-del.hand-hover { background-color: rgba(220, 40, 50, 0.6); border-color: var(--err); }
+
+      /* ---- Save dialog ---- */
+      #dialog { z-index: 15; }
+      .dialog { width: min(460px, 100%); padding: 22px 24px; border-radius: 20px; background: var(--glass-strong); border: 1px solid var(--line-strong); box-shadow: var(--shadow); }
+      .dialog h2 { margin: 0 0 14px; font-size: 20px; }
+      .dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+      .dialog input {
+        font: 15px var(--sans); color: var(--text); padding: 11px 12px; border-radius: 10px; outline: none;
+        background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line-strong); text-transform: none; letter-spacing: 0;
+      }
+      .dialog input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+      .dialog p { font-size: 12px; margin: 10px 0 18px; }
+      .dialog-actions { display: flex; gap: 10px; }
+      .dialog-actions button { flex: 1; padding: 14px 10px; font-size: 14px; font-weight: 600; }
+      .dialog-actions .primary { background-color: rgba(62, 224, 181, 0.22); border-color: rgba(62, 224, 181, 0.7); }
+
+      /* ---- Code drawer ---- */
       #code {
-        position: fixed; top: 12px; right: 304px; width: min(520px, calc(100vw - 500px)); bottom: 70px;
-        display: none; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px;
-        background: rgba(12, 14, 20, 0.92); color: #e6e6e6; font-size: 13px; z-index: 5;
+        position: fixed; top: 14px; right: 324px; width: min(540px, calc(100vw - 460px)); bottom: 74px; z-index: 5;
+        display: none; flex-direction: column; gap: 8px; padding: 12px; font-size: 13px;
+        background: var(--glass-strong); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow);
       }
       #code.open { display: flex; }
       #code .code-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      #code .code-head b { font-size: 15px; }
       #code .code-head .code-close { margin-left: auto; }
       #code .code-boards { display: flex; gap: 4px; flex-wrap: wrap; }
-      #code .code-boards button.sel { background-color: rgba(60, 130, 255, 0.9); }
-      #code .code-presets { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; color: #aaa; }
-      #code .code-edit { flex: 1; min-height: 120px; display: flex; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
-      #code .code-gutter, #code textarea {
-        margin: 0; padding: 8px 6px; font: 13px/1.45 ui-monospace, Consolas, monospace; border: 0;
-      }
-      #code .code-gutter { width: 2.6em; text-align: right; color: #666; background: #0b0d12; overflow: hidden; user-select: none; }
-      #code textarea { flex: 1; resize: none; outline: none; background: #11141b; color: #e8e8e8; tab-size: 2; white-space: pre; }
-      #code .code-actions { display: flex; align-items: center; gap: 8px; }
-      #code .code-upload { font-weight: 600; background-color: rgba(30, 120, 70, 0.95); }
-      #code .code-upload:disabled { opacity: 0.5; }
-      #code .code-progress { width: 110px; height: 8px; border-radius: 4px; background: #222; overflow: hidden; }
-      #code .code-progress > div { height: 100%; width: 0; background: #3ddc84; transition: width 0.08s linear; }
-      #code .code-status.ok { color: #3ddc84; }
-      #code .code-status.err { color: #ff7b7b; }
+      #code .code-boards button.sel { background-color: rgba(90, 168, 255, 0.35); border-color: var(--blue); }
+      #code .code-presets { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+      #code .code-edit { flex: 1; min-height: 120px; display: flex; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; }
+      #code .code-gutter, #code textarea { margin: 0; padding: 8px 6px; font: 13px/1.45 var(--mono); border: 0; }
+      #code .code-gutter { width: 2.8em; text-align: right; color: #5a6476; background: #0a0d12; overflow: hidden; user-select: none; }
+      #code textarea { flex: 1; resize: none; outline: none; background: #0f131a; color: #e8e8e8; tab-size: 2; white-space: pre; }
+      #code .code-actions { display: flex; align-items: center; gap: 10px; }
+      #code .code-upload { font-weight: 700; padding: 8px 14px; background-color: rgba(62, 224, 181, 0.22); border-color: rgba(62, 224, 181, 0.7); }
+      #code .code-progress { width: 110px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+      #code .code-progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
+      #code .code-status.ok { color: var(--accent); }
+      #code .code-status.err { color: var(--err); }
       #code .code-errors { display: flex; flex-direction: column; gap: 3px; }
-      #code .code-error { text-align: left; color: #ffb3b3; border-color: rgba(255, 80, 80, 0.5) !important; font-family: ui-monospace, Consolas, monospace; }
-      #code .code-serial-head { display: flex; justify-content: space-between; align-items: center; color: #aaa; }
+      #code .code-error { text-align: left; color: #ffb3b3; border-color: rgba(255, 107, 107, 0.5); font-family: var(--mono); }
+      #code .code-serial-head { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
       #code .code-serial {
-        height: 22%; min-height: 70px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: 6px;
-        background: #000; color: #9cff9c; font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap;
+        height: 22%; min-height: 70px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 10px;
+        background: #020304; color: #8dffc8; font: 12px/1.4 var(--mono); white-space: pre-wrap; border: 1px solid var(--line);
       }
-      #code .code-hint { color: #888; font-size: 11px; }
-      #trash.active { background: rgba(200, 30, 30, 0.7); color: #fff; }
+      #code .code-hint { color: var(--muted); font-size: 11px; }
     </style>
   </head>
   <body>
     <video id="video" autoplay playsinline muted></video>
     <canvas id="scene"></canvas>
     <canvas id="skeleton"></canvas>
-    <div id="toolbar"></div>
+    <nav id="toolbar" class="glass"></nav>
     <div id="right">
-      <div id="status"></div>
-      <div id="messages"></div>
-      <div id="sensors"></div>
+      <div id="status" class="glass"></div>
+      <div id="messages" class="glass"></div>
+      <div id="sensors" class="glass"></div>
     </div>
     <div id="code"></div>
+    <div id="catalog" class="overlay"></div>
+    <div id="saved" class="overlay"></div>
+    <div id="dialog" class="overlay"></div>
     <div id="tooltip"></div>
     <div id="hint"></div>
-    <div id="trash">🗑 Drop here<br>to delete</div>
+    <div id="toast"></div>
+    <div id="trash"><b>🗑</b>Drop here<br>to delete</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

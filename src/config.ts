@@ -65,6 +65,9 @@ export const config = {
     mouseRotateStepRad: Math.PI / 12,
     // Hand mode: hold the index fingertip on a toolbar button this long to spawn it.
     dwellSpawnMs: 2000,
+    // While holding a part with a fist: its size = (palm size ratio since the grab) ^ gain, clamped.
+    // It returns to 1 when dropped, so its pins still line up with the breadboard holes.
+    heldScale: { gain: 2, min: 0.5, max: 3 },
     // Shorter dwell for the zoom toggle (nothing is created, so a mis-trigger is harmless).
     dwellZoomMs: 1500,
     // A hovered pin stays selected until the pointer leaves pinStickRadiusPx or another pin is
@@ -81,8 +84,6 @@ export const config = {
     // Camera zoom factor when zoomed onto a part, and per-frame easing toward the target (0..1).
     factor: 2.2,
     easing: 0.15,
-    // While holding a part with a fist: zoom = view zoom at grab * (palm size ratio) ^ gain, clamped.
-    depth: { gain: 2, min: 0.6, max: 3.5 },
   },
   fps: {
     // Window over which the FPS counter averages frame times (ms).
@@ -144,6 +145,10 @@ export const config = {
     scissorStartFrames: 2,
     scissorOpen: 0.4,
     scissorClose: 0.25,
+    // Menu poses: thumb folded (tip within thumbTuckMax hand-sizes of the ring knuckle) plus
+    // 4 fingers up = parts catalog, index + middle + ring up = saved circuits; held menuPoseHoldMs.
+    thumbTuckMax: 0.6,
+    menuPoseHoldMs: 700,
     // Wrist roll is measured relative to the roll at pinch start; ignore tiny changes.
     rollDeadzoneRad: 0.05,
     tiltDeadzoneRad: 0.05,

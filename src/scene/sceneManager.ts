@@ -54,22 +54,6 @@ export class SceneManager {
     return this.zoomGoal.zoom !== 1;
   }
 
-  /** The view the camera is easing to (centre x, y and zoom). */
-  get view(): ZoomView {
-    return { ...this.zoomGoal };
-  }
-
-  set view(v: ZoomView) {
-    this.zoomGoal = { ...v };
-  }
-
-  /** Change the zoom while keeping the world point `p` at the same spot on screen. */
-  zoomAbout(p: THREE.Vector3, zoom: number): void {
-    const g = this.zoomGoal;
-    const k = g.zoom / zoom;
-    this.zoomGoal = { x: p.x - k * (p.x - g.x), y: p.y - k * (p.y - g.y), zoom };
-  }
-
   /** Zoom the camera onto a world point (null = back to the full view). Eased in stepZoom(). */
   zoomTo(target: THREE.Vector3 | null, factor = config.zoom.factor): void {
     this.zoomGoal = target ? { x: target.x, y: target.y, zoom: factor } : { x: 0, y: 0, zoom: 1 };

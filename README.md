@@ -21,7 +21,11 @@ The MediaPipe WASM runtime and hand model are bundled in `public/mediapipe/`, so
 
 ## Demo: the golden path
 
-1. Spawn a **board** (Arduino Uno or ESP32), a **Breadboard**, a **Resistor** and an **LED** from the left toolbar.
+**Quickest:** show **3 fingers** (or press **L**) and pick a working template, e.g. *Blink LED* or *IR proximity light*, then press **▶ Run**.
+
+To build it yourself:
+
+1. Show **4 fingers** (or press **P**) to open the **Parts catalog** and add a **board** (Arduino Uno or ESP32), a **Breadboard**, a **Resistor** and an **LED**.
 2. Plug the resistor and the LED into the breadboard. Each leg snaps into a hole. Holes in the same column (a–e or f–j) are connected, and the `+` / `−` rails each run the full length.
 3. Wire it:
    - Arduino: `D13 → resistor → LED anode (+, longer leg)`, then `LED cathode → GND`
@@ -43,7 +47,9 @@ If something is wrong, the panel says why:
 
 | Gesture | How | Does |
 |---|---|---|
-| **Spawn** | Hold your index fingertip on a toolbar button for **2 s** (the button fills up and counts down) | Spawn that part |
+| **Parts catalog** | Show **4 fingers** with the thumb folded across the palm, hold ~0.7 s | Opens every board, part and sensor; hold the fingertip on a card to add it |
+| **Saved circuits** | Show **3 fingers** (index, middle, ring) with the thumb folded, hold ~0.7 s | Opens the working templates and your saved circuits |
+| **Press a button** | Hold your index fingertip on any on-screen button or card (it fills up and counts down) | Press it |
 | **Grab** | Put your palm (orange ring) over a part and make a **fist** | Grab the part |
 | **Move** | Keep the fist and move your hand | Carry the grabbed part |
 | **Rotate** | Keep the fist and roll your wrist (tilt the palm to pitch). Or grip with **both** hands and twist | Rotate the part |
@@ -52,9 +58,14 @@ If something is wrong, the panel says why:
 | **Loose end** | Release a wire away from any pin; pinch its round tip later to carry on | The end stays in the air |
 | **Unplug** | Pinch a wire and hold still for **2 s** | Its nearest end comes off into your hand |
 | **Cut** | Make a ✌ V sign, aim the red cross-hair at a wire (it turns red), spread then close the two fingers | Delete that wire |
-| **Zoom** | While holding a part with a fist, push toward / pull back from the camera. Or press **Z** / the 🔍 button | Zoom in / out |
+| **Enlarge** | While holding a part with a fist, push toward / pull back from the camera | That part grows / shrinks to inspect it (normal size again when dropped) |
+| **Zoom** | Press **Z** or hold the fingertip on 🔍 | Zoom the whole view in / out |
 | **Press** | Point your index fingertip at a 3D button and push it toward the screen, or pinch on it | Run / Stop / Reset |
 | **Delete** | Drop a part (fist) or a wire (pinch it) on the red **trash** box (bottom-left) | Remove it |
+
+The thumb has to be folded for the menu poses, so a relaxed open hand never opens a menu. Showing the same pose again (or the ✕) closes it; the scene is paused while a menu is open.
+
+**Focus mode:** the 🌓 **Focus** button in the dock (or **B**) swaps the camera image for a black backdrop, so only the parts, wires and your hand skeleton are visible. Tracking keeps running; press it again to get the camera view back. The choice is remembered.
 
 Other tips:
 - Move the breadboard by pinching its **"grab here"** tab, since its holes start wires. Parts plugged into the breadboard move with it.
@@ -106,9 +117,25 @@ Press **M** to switch between hands and mouse. The app also switches to mouse mo
 | Wheel / **R** (Shift+R reverses) | Rotate the hovered or held part |
 | **Delete** / Backspace | Delete the hovered wire or part |
 | Click a 3D button, or **Enter** / **Space** / **N** | Run / Stop / Reset |
-| **C** / **Z** | Code panel / zoom |
+| **P** / **L** / **S** | Parts catalog / Saved circuits / Save as… (**Esc** closes a menu) |
+| **C** / **Z** / **B** | Code panel / zoom / focus mode |
 
 Hover any pin to see its name.
+
+## Saved circuits and templates
+
+**Saved circuits** (3 fingers or **L**) has six working templates, all on an Arduino Uno with the parts already plugged into the breadboard and the matching sketch loaded:
+
+| Template | Try it |
+|---|---|
+| Blink LED | Run: the LED blinks |
+| Fading LED (PWM) | Run: the LED on D9 breathes |
+| IR proximity light | Run, then bring your hand in front of the IR sensor |
+| Parking sensor | Run, move your hand toward the HC-SR04; closer than 15 cm lights the LED (distance in the Serial Monitor) |
+| Clap switch | Run, then clap (enable the mic) or hold **V** |
+| Gas leak alarm | Run, then hold **G** |
+
+**Saving:** the 💾 Save button (or **S**) asks for a file name. **Reset** and opening another circuit ask *"Save before…?"* first if the circuit changed, with **Save** / **Don't save** / **Cancel**; the name is pre-filled, so in hand mode you can just dwell on Save. Saves keep the parts, their positions, the wires (loose ends too) and each board's uploaded sketch, and are stored in the browser's localStorage. A browser can't show a page's own dialog while the tab closes, so closing the tab autosaves to **"Last session (autosave)"** instead.
 
 ## Performance
 
@@ -135,7 +162,9 @@ src/
   sim/machine.ts           runs every board's program against the circuit (pure)
   sim/validator.ts         rule-based circuit checker (pure)
   scene/sensing.ts         hand / mouse / microphone -> what each sensor senses
-  ui/                      toolbar, status / messages / sensors panels, code panel, hints, 3D controls
+  scene/circuits.ts        save / load circuits (localStorage) + the working templates
+  ui/                      dock, status / messages / sensors panels, code panel, hints, 3D controls
+  ui/menus.ts              parts catalog, saved circuits, save dialog
 tests/                     Vitest suites for the pure modules
 ```
 

@@ -14,6 +14,8 @@ const COLORS: Record<'none' | 'scissors' | Grip, string> = {
 /** 2D overlay that draws each tracked hand as a skeleton (bones + joints) over the video. */
 export class SkeletonOverlay {
   private ctx: CanvasRenderingContext2D;
+  /** Focus mode (black backdrop): thicker, glowing bones so the hand reads without the video. */
+  glow = false;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -43,8 +45,10 @@ export class SkeletonOverlay {
       const pts = hand.landmarks.map((p) => this.toScreen(p.x, p.y));
 
       ctx.lineCap = 'round';
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = this.glow ? 6 : 4;
+      ctx.strokeStyle = this.glow ? 'rgba(235,245,255,0.95)' : 'rgba(255,255,255,0.75)';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = this.glow ? 18 : 0;
       ctx.beginPath();
       for (const { start, end } of BONES) {
         ctx.moveTo(pts[start].px, pts[start].py);
@@ -55,9 +59,10 @@ export class SkeletonOverlay {
       ctx.fillStyle = color;
       for (const p of pts) {
         ctx.beginPath();
-        ctx.arc(p.px, p.py, 4, 0, Math.PI * 2);
+        ctx.arc(p.px, p.py, this.glow ? 5.5 : 4, 0, Math.PI * 2);
         ctx.fill();
       }
+      ctx.shadowBlur = 0;
 
       // Grab anchor (palm centre) and wiring anchor (pinch point) markers.
       const palm = palmCenter(hand.landmarks);

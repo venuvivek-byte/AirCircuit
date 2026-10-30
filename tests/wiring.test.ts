@@ -179,3 +179,36 @@ describe('scissors', () => {
     expect(ix.cutWire).toBeNull();
   });
 });
+
+describe('fist enlarge', () => {
+  it('scales only the held part (wires follow its pins) and drops it back at true size', () => {
+    const sm = makeSceneManager();
+    const world = new World(sm);
+    const held = new Part('held', [['A', 0.3, 0]]);
+    held.root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 0.2, 1)));
+    const other = new Part('other', [['B', 2, 1]]);
+    for (const c of [held, other]) {
+      world.components.push(c);
+      sm.workspace.add(c.root);
+    }
+    sm.workspace.updateMatrixWorld(true);
+    const ix = new Interaction(sm, world, () => false);
+    world.addWire({ componentId: 'held', pin: 'A' }, { componentId: 'other', pin: 'B' });
+
+    const at = sm.worldToScreen(new THREE.Vector3(0, 0.2, 0).applyMatrix4(sm.workspace.matrixWorld));
+    ix.update({ ...at, down: false });
+    ix.update({ ...at, down: true, grip: 'fist' });
+    expect(ix.grabbed).toBe(held);
+
+    const before = world.endLocal(world.wires[0].a).clone();
+    ix.scaleGrabbed(2);
+    expect(held.root.scale.x).toBe(2);
+    expect(other.root.scale.x).toBe(1);
+    // The pin moved outward with the scaled part, so the wire end did too.
+    expect(world.endLocal(world.wires[0].a).x - held.root.position.x).toBeCloseTo((before.x - held.root.position.x) * 2, 5);
+
+    ix.update({ ...at, down: false });
+    expect(ix.grabbed).toBeNull();
+    expect(held.root.scale.x).toBe(1);
+  });
+});

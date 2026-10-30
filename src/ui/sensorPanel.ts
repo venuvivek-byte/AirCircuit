@@ -53,14 +53,14 @@ export class SensorPanel {
     if (!rows.length) return;
     const lines = rows.map((r) => {
       const name = `${SENSORS[r.kind].label.split(' (')[0]} #${r.id.split('-').pop()}`;
-      if (!r.powered) return `<div class="sens-row off">${name}: <i>not powered</i></div>`;
+      if (!r.powered) return `<div class="sens-row off"><span>${name}</span><i>not powered</i></div>`;
       const e = r.env;
       const value =
         r.kind === 'ir' ? (e.obstacle ? '✋ obstacle' : 'clear')
         : r.kind === 'ultrasonic' ? (e.distanceCm === null ? 'out of range' : `${e.distanceCm.toFixed(0)} cm`)
         : r.kind === 'sound' ? bar(e.sound)
         : bar(e.gas);
-      return `<div class="sens-row">${name}: ${value}</div>`;
+      return `<div class="sens-row"><span>${name}</span><span>${value}</span></div>`;
     });
     const html = lines.join('');
     if (html !== this.lastHtml) {

@@ -226,6 +226,15 @@ export class Interaction {
     this.moveCarried();
   }
 
+  /** Size of the grabbed component (and parts plugged into it) while held; reset to 1 on drop. */
+  scaleGrabbed(s: number): void {
+    const c = this.grabbed;
+    if (!c) return;
+    c.root.scale.setScalar(s);
+    this.moveCarried();
+    this.world.updateWires();
+  }
+
   /** Rotate the grabbed component (or the hovered one) by a fixed step around Y. */
   rotateStep(yaw: number): void {
     const c = this.grabbed ?? this.hoverComponent;
@@ -352,6 +361,8 @@ export class Interaction {
       // Pitch is only for inspecting while held; components always land flat.
       c.root.rotation.x = 0;
       c.root.rotation.z = 0;
+      // Enlarging is only for inspecting while held; parts land at true size so they still snap.
+      c.root.scale.setScalar(1);
       this.mode = mode;
       this.moveCarried();
       this.mode = { kind: 'idle' };

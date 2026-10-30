@@ -446,6 +446,63 @@ export class ScissorDetector {
 }
 
 // ---------------------------------------------------------------------------
+// Menu poses (finger counts)
+// ---------------------------------------------------------------------------
+
+/** Thumb folded across the palm: its tip near the ring-finger knuckle (hand-size units). */
+export function thumbTucked(lm: HandLandmarks, max: number = config.gestures.thumbTuckMax): boolean {
+  const size = dist3(lm[LM.WRIST], lm[LM.MIDDLE_MCP]);
+  return size > 1e-9 && dist3(lm[LM.THUMB_TIP], lm[LM.RING_MCP]) / size < max;
+}
+
+export type MenuPose = 'three' | 'four';
+
+/**
+ * Finger-count poses that open menus. The thumb must be folded so that a relaxed open hand
+ * (five fingers) never counts as four. three = index + middle + ring up, pinky down.
+ */
+export function menuPose(
+  lm: HandLandmarks,
+  extended: number = config.gestures.scissorExtended,
+  curled: number = config.gestures.scissorCurled,
+): MenuPose | null {
+  if (!thumbTucked(lm)) return null;
+  const up = [0, 1, 2, 3].map((f) => fingerCurl(lm, f as 0 | 1 | 2 | 3) > extended);
+  const down = fingerCurl(lm, 3) < curled;
+  if (up[0] && up[1] && up[2] && up[3]) return 'four';
+  if (up[0] && up[1] && up[2] && down) return 'three';
+  return null;
+}
+
+/**
+ * Fires a pose once it has been held for `holdMs`; it can't fire again until the pose is released,
+ * so holding it doesn't flicker a menu open and shut.
+ */
+export class PoseHold<P extends string> {
+  private pose: P | null = null;
+  private since = 0;
+  private fired = false;
+
+  constructor(private readonly holdMs: number = config.gestures.menuPoseHoldMs) {}
+
+  /** Returns the pose on the frame it fires, else null. `progress` is 0..1 while holding. */
+  update(pose: P | null, now: number): { fired: P | null; holding: P | null; progress: number } {
+    if (pose !== this.pose) {
+      this.pose = pose;
+      this.since = now;
+      this.fired = false;
+    }
+    if (!pose) return { fired: null, holding: null, progress: 0 };
+    const progress = Math.min(1, (now - this.since) / this.holdMs);
+    if (progress >= 1 && !this.fired) {
+      this.fired = true;
+      return { fired: pose, holding: pose, progress };
+    }
+    return { fired: null, holding: this.fired ? null : pose, progress };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Static gesture classification
 // ---------------------------------------------------------------------------
 

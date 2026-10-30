@@ -13,11 +13,16 @@ import { handSize } from './tracking/gestures';
 import { HandControl, type HandFrame } from './scene/handControl';
 import { HandSmoother, TrackingRateController } from './tracking/smoothing';
 import { LM, type TrackedHand } from './tracking/types';
-import { SceneManager, type ZoomView } from './scene/sceneManager';
+import { SceneManager } from './scene/sceneManager';
 import { Interaction, type Grip, type PointerState } from './scene/interaction';
 import { handDepthZ, videoToScreen } from './scene/mapping';
 import { World, type PinHit } from './scene/world';
-import { FpsCounter, HintBar, MessagesPanel, StatusPanel, Toolbar, Tooltip, type StatusInfo } from './ui/panel';
+import { Dock, FpsCounter, HintBar, MessagesPanel, StatusPanel, Tooltip, type StatusInfo } from './ui/panel';
+import { CatalogSheet, SaveDialog, SavedSheet, partIcon } from './ui/menus';
+import {
+  AUTOSAVE_NAME, TEMPLATES, buildTemplate, deleteSave, listSaves, restore, serialize, storeSave,
+} from './scene/circuits';
+import { compile } from './sim/arduino/compiler';
 import { ControlButtons, type ControlAction } from './ui/controls';
 import { SkeletonOverlay } from './ui/skeleton';
 import { CodePanel } from './ui/codePanel';
@@ -51,12 +56,124 @@ const hintBar = new HintBar(document.getElementById('hint')!);
 const controls = new ControlButtons(sceneManager, (a) => onControl(a));
 
 // Dev-only handle for automated browser checks.
-if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction, controls, get machine() { return machine; } } });
+if (import.meta.env.DEV) Object.assign(window, { __app: { world, sceneManager, interaction, controls, get machine() { return machine; }, get menus() { return { catalog, saved, saveDialog }; } } });
 
-new Toolbar(document.getElementById('toolbar')!, (action) => {
+new Dock(document.getElementById('toolbar')!, partIcon, (action) => {
   if (action === 'zoom') toggleZoom();
   else if (action === 'code') codePanel.toggle();
-  else world.spawn(action);
+  else if (action === 'save') void saveAs();
+  else if (action === 'focus') setFocus(!document.body.classList.contains('focus-mode'));
+  else openMenu(action);
+});
+
+// ---- Focus mode: black backdrop instead of the camera image (tracking keeps running) ----
+const FOCUS_KEY = 'aircircuit.focus';
+function setFocus(on: boolean): void {
+  document.body.classList.toggle('focus-mode', on);
+  skeleton.glow = on;
+  try {
+    localStorage.setItem(FOCUS_KEY, on ? '1' : '0');
+  } catch {
+    /* storage unavailable: just not remembered */
+  }
+}
+
+// ---- Menus (4 fingers = parts catalog, 3 fingers = saved circuits) and saving ----
+const catalog = new CatalogSheet(document.getElementById('catalog')!, (kind) => {
+  world.spawn(kind);
+  toast('Added · make a fist over it to move it');
+});
+const saved = new SavedSheet(document.getElementById('saved')!, {
+  templates: TEMPLATES,
+  list: listSaves,
+  loadTemplate: (t) => void replaceScene(() => [buildTemplate(world, t)], t.title, `Loaded "${t.title}" · ${t.tryIt}`),
+  loadSave: (s) => void replaceScene(() => restore(world, s), s.name === AUTOSAVE_NAME ? '' : s.name, `Opened "${s.name}"`),
+  deleteSave: (name) => deleteSave(name),
+  saveNow: () => void saveAs(),
+});
+const saveDialog = new SaveDialog(document.getElementById('dialog')!);
+
+function openMenu(which: 'catalog' | 'circuits' | null): void {
+  if (saveDialog.open) return;
+  const wantCatalog = which === 'catalog' && !catalog.open;
+  const wantSaved = which === 'circuits' && !saved.open;
+  catalog.toggle(wantCatalog);
+  saved.toggle(wantSaved);
+}
+
+const overlayOpen = () => catalog.open || saved.open || saveDialog.open;
+
+const toastEl = document.getElementById('toast')!;
+let toastTimer = 0;
+function toast(text: string): void {
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove('show'), 4000);
+}
+
+/** Name of the circuit on screen (from the last save / load), and the world version at that point. */
+let circuitName = '';
+let savedVersion = 0;
+const unsaved = () => world.components.length > 0 && world.version !== savedVersion;
+
+function defaultName(): string {
+  if (circuitName) return circuitName;
+  const d = new Date();
+  return `Circuit ${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function saveCurrent(name: string): void {
+  const ok = storeSave(serialize(world, name, (b) => machine.uploadedSource(b.id)));
+  if (ok) {
+    circuitName = name;
+    savedVersion = world.version;
+  }
+  toast(ok ? `Saved "${name}" · open it from Saved circuits (3 fingers)` : 'Could not save: browser storage is full or blocked.');
+}
+
+async function saveAs(): Promise<void> {
+  if (!world.components.length) {
+    toast('Nothing to save yet: add parts from the catalog first.');
+    return;
+  }
+  const c = await saveDialog.ask('Save circuit', defaultName(), false);
+  if (c?.save) saveCurrent(c.name);
+}
+
+/** Before the scene is replaced: offer to save unsaved work. False when the user cancels. */
+async function confirmLeave(title: string): Promise<boolean> {
+  if (!unsaved()) return true;
+  const c = await saveDialog.ask(title, defaultName());
+  if (!c) return false;
+  if (c.save) saveCurrent(c.name);
+  return true;
+}
+
+function clearScene(): void {
+  machine.reset();
+  interaction.update(null);
+  world.clear();
+  sceneManager.zoomTo(null);
+}
+
+/** Load a template / save: clears the scene, builds it, stores (doesn't run) the boards' sketches. */
+async function replaceScene(build: () => Array<{ boardId: string; source: string }>, name: string, message: string): Promise<void> {
+  if (!(await confirmLeave('Save the current circuit before opening another?'))) return;
+  clearScene();
+  for (const s of build()) {
+    const b = world.get(s.boardId);
+    const r = b instanceof Board ? compile(s.source, b.def.kind) : null;
+    if (r?.ok) machine.upload(s.boardId, r.program, false);
+  }
+  circuitName = name;
+  savedVersion = world.version;
+  toast(message);
+}
+
+// Closing the tab can't show a dialog with a name box, so the work is autosaved instead.
+window.addEventListener('beforeunload', () => {
+  if (unsaved()) storeSave(serialize(world, AUTOSAVE_NAME, (b) => machine.uploadedSource(b.id)));
 });
 
 /** Zoom onto the part under the pointer, else the breadboard, else the workspace centre; or zoom back out. */
@@ -87,6 +204,12 @@ window.addEventListener('keydown', (e) => {
   // Typing in the code editor must not trigger shortcuts.
   const t = e.target;
   if (t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement) return;
+  if (saveDialog.open) return;
+  if (e.key === 'Escape') openMenu(null);
+  if (e.key === 'p' || e.key === 'P') openMenu('catalog');
+  if (e.key === 'l' || e.key === 'L') openMenu('circuits');
+  if (e.key === 's' || e.key === 'S') void saveAs();
+  if (e.key === 'b' || e.key === 'B') setFocus(!document.body.classList.contains('focus-mode'));
   if (!e.repeat) held.add(e.key.toLowerCase());
   if (e.key === 'c' || e.key === 'C') codePanel.toggle();
   if (e.key === 'm' || e.key === 'M') {
@@ -137,8 +260,14 @@ const handToScreen = (x: number, y: number) =>
 const handControl = new HandControl(handToScreen);
 const skeleton = new SkeletonOverlay(document.getElementById('skeleton') as HTMLCanvasElement, handToScreen);
 let lastHandPointer: PointerState | null = null;
+try {
+  setFocus(localStorage.getItem(FOCUS_KEY) === '1');
+} catch {
+  /* storage unavailable */
+}
 let lastGrips: Array<Grip | null> = [];
 let lastScissors: HandFrame['scissors'] = null;
+let lastMenu: { pose: 'three' | 'four'; progress: number } | null = null;
 
 function landmarkToScreen(hand: TrackedHand, index: number): { px: number; py: number } {
   const p = hand.landmarks[index];
@@ -186,7 +315,18 @@ function updateHandInput(hands: TrackedHand[], now: number): void {
   const tip =
     primary && frame.grip === null && !frame.scissors && !interaction.busy ? landmarkToScreen(primary, LM.INDEX_TIP) : null;
   const button = tip ? uiButtonAt(tip.px, tip.py) : null;
-  setDwell(button?.closest('#toolbar, #code, #sensors') ? button : null, now);
+  // With a menu open only its cards can be pressed; the scene underneath is paused.
+  const overlay = overlayOpen();
+  setDwell(button?.closest(overlay ? '#catalog, #saved, #dialog' : '#toolbar, #code, #sensors') ? button : null, now);
+  if (frame.menu.fired && !interaction.busy) openMenu(frame.menu.fired === 'four' ? 'catalog' : 'circuits');
+  lastMenu = frame.menu.holding && !interaction.busy ? { pose: frame.menu.holding, progress: frame.menu.progress } : null;
+  if (overlay) {
+    interaction.update(null);
+    controls.updateFingertip(null);
+    interaction.scissors(null);
+    lastScissors = null;
+    return;
+  }
 
   // 3D Run / Stop / Reset: pinch on them, or push with the index fingertip (depth from palm size).
   let onControl = false;
@@ -206,28 +346,14 @@ function updateHandInput(hands: TrackedHand[], now: number): void {
   interaction.scissors(frame.scissors);
   lastScissors = frame.scissors;
   if (frame.rotation) interaction.rotateGrabbed(frame.rotation.yaw, frame.rotation.pitch);
-  updateDepthZoom(frame.depth);
+  updateHeldScale(frame.depth);
 }
 
-/** View when the current fist grab started: the base the depth zoom scales from. */
-let preGrabView: ZoomView | null = null;
-const heldPos = new THREE.Vector3();
-
-/**
- * Fist push toward the camera zooms in on the held part, pulling back zooms out.
- * Opening the fist keeps whatever zoom was reached (Z / 🔍 zooms back out).
- */
-function updateDepthZoom(depth: number | null): void {
-  const held = interaction.grabbed;
-  if (depth === null || !held) {
-    preGrabView = null;
-    return;
-  }
-  preGrabView ??= sceneManager.view;
-  const { gain, min, max } = config.zoom.depth;
-  const zoom = Math.min(max, Math.max(min, preGrabView.zoom * depth ** gain));
-  // Zoom about the part so it stays under the fist instead of the view jumping.
-  sceneManager.zoomAbout(held.root.getWorldPosition(heldPos), zoom);
+/** Fist push toward the camera enlarges the held part, pulling back shrinks it (only that part). */
+function updateHeldScale(depth: number | null): void {
+  if (depth === null || !interaction.grabbed) return;
+  const { gain, min, max } = config.interaction.heldScale;
+  interaction.scaleGrabbed(Math.min(max, Math.max(min, depth ** gain)));
 }
 
 // ---- Simulation + validator ----
@@ -274,12 +400,14 @@ function updateEnvironment(hands: TrackedHand[], now: number): void {
 function onControl(action: ControlAction): void {
   if (action === 'run') machine.start();
   else if (action === 'stop') machine.stop();
-  else {
-    machine.reset();
-    interaction.update(null);
-    world.clear();
-    sceneManager.zoomTo(null);
-  }
+  else void resetScene();
+}
+
+async function resetScene(): Promise<void> {
+  if (!(await confirmLeave('Save the circuit before resetting?'))) return;
+  clearScene();
+  circuitName = '';
+  savedVersion = world.version;
 }
 
 function updateSimulation(now: number): void {
@@ -397,7 +525,8 @@ function loop(now: number): void {
   status.handCount = hands.length;
 
   if (status.input === 'mouse') {
-    interaction.update(mouseInside ? mouse : null);
+    interaction.update(mouseInside && !overlayOpen() ? mouse : null);
+    lastMenu = null;
     controls.updateFingertip(null);
     setDwell(null, now);
     lastGrips = [];
@@ -430,6 +559,8 @@ function loop(now: number): void {
     action: interaction.action,
     detachProgress: interaction.detachProgress,
     scissors: lastScissors && { open: lastScissors.open, aimed: !!interaction.cutWire },
+    menu: lastMenu,
+    overlay: overlayOpen(),
   });
 
   skeleton.draw(status.input === 'hand' ? hands : [], lastGrips, lastScissors);

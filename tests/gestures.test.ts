@@ -10,6 +10,9 @@ import {
   RuleBasedClassifier,
   ScissorDetector,
   isScissorPose,
+  PoseHold,
+  menuPose,
+  thumbTucked,
   TwoHandTwistTracker,
   angleDelta,
   handSize,
@@ -428,5 +431,50 @@ describe('ScissorDetector', () => {
     d.update(vSign(0.6));
     expect(d.update(makeHand({ curl: 0 })).active).toBe(false);
     expect(d.update(vSign(0.15)).snip).toBe(false);
+  });
+});
+
+describe('menu poses (finger counts)', () => {
+  /** Fingers per `curls`, thumb folded across the palm (tip near the ring knuckle). */
+  function counted(curls: [number, number, number, number], tucked = true): HandLandmarks {
+    const lm = makeHand({ curls });
+    if (tucked) {
+      const r = lm[LM.RING_MCP];
+      const w = lm[LM.WRIST];
+      lm[LM.THUMB_TIP] = { x: r.x + (w.x - r.x) * 0.2 - 0.03, y: r.y + (w.y - r.y) * 0.2, z: r.z - 0.02 };
+    }
+    return lm;
+  }
+
+  it('four fingers and three fingers need the thumb folded', () => {
+    expect(thumbTucked(counted([0, 0, 0, 0]))).toBe(true);
+    expect(thumbTucked(makeHand({ curl: 0 }))).toBe(false);
+    expect(menuPose(counted([0, 0, 0, 0]))).toBe('four');
+    expect(menuPose(counted([0, 0, 0, 1]))).toBe('three');
+    // A relaxed open hand (thumb out) is not "four".
+    expect(menuPose(makeHand({ curl: 0 }))).toBe(null);
+    expect(menuPose(counted([0, 0, 0, 0], false))).toBe(null);
+  });
+
+  it('other finger counts and fists are not menu poses', () => {
+    expect(menuPose(counted([0, 0, 1, 1]))).toBe(null);
+    expect(menuPose(counted([0, 1, 1, 1]))).toBe(null);
+    expect(menuPose(counted([1, 1, 1, 1]))).toBe(null);
+    expect(menuPose(counted([1, 0, 0, 0]))).toBe(null);
+  });
+
+  it('fires once after the hold time, again only after releasing the pose', () => {
+    const h = new PoseHold<'three' | 'four'>(700);
+    expect(h.update('four', 0).fired).toBe(null);
+    expect(h.update('four', 400)).toMatchObject({ fired: null, holding: 'four' });
+    expect(h.update('four', 400).progress).toBeCloseTo(400 / 700);
+    expect(h.update('four', 720).fired).toBe('four');
+    expect(h.update('four', 2000)).toMatchObject({ fired: null, holding: null });
+    // Switching pose restarts the hold.
+    expect(h.update('three', 2100).fired).toBe(null);
+    expect(h.update('three', 2900).fired).toBe('three');
+    h.update(null, 3000);
+    h.update('three', 3100);
+    expect(h.update('three', 3850).fired).toBe('three');
   });
 });

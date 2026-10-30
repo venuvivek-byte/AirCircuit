@@ -57,9 +57,11 @@ export class Machine {
   }
 
   /** Flash a program onto a board and boot it (powering the circuit, like plugging in USB). */
-  upload(boardId: string, program: CompiledProgram): void {
+  upload(boardId: string, program: CompiledProgram, boot = true): void {
     this.programs.set(boardId, program);
     this.runtimes.delete(boardId);
+    // Loading a saved circuit only stores the sketch: it runs on the next Run.
+    if (!boot) return;
     this.appendLog(boardId, '\n--- upload complete, board reset ---\n');
     this.running = true;
   }
@@ -67,6 +69,11 @@ export class Machine {
   /** Source of the program a board runs (its upload, else Blink). */
   sourceFor(boardId: string, kind: BoardKind): string {
     return (this.programs.get(boardId) ?? defaultProgram(kind)).source;
+  }
+
+  /** Source uploaded to a board, or null while it runs the default Blink. */
+  uploadedSource(boardId: string): string | null {
+    return this.programs.get(boardId)?.source ?? null;
   }
 
   serialLog(boardId: string): string {
